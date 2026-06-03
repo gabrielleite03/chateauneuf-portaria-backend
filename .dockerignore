@@ -1,0 +1,16 @@
+.git
+.vscode
+bin
+data
+dist
+coverage.out
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.err
+.env
+config/google-service-account.json
+credentials
+backend-dev.log
+backend-dev.err

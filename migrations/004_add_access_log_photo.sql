@@ -1,0 +1,1 @@
+ALTER TABLE access_logs ADD COLUMN photo TEXT NOT NULL DEFAULT '';
