@@ -44,6 +44,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 	mux.HandleFunc("POST /api/scheduled-services/delete", scheduledServiceHandler.Delete)
 	mux.HandleFunc("GET /api/sync/status", syncHandler.Status)
 	mux.HandleFunc("POST /api/sync/run", syncHandler.Run)
+	mux.HandleFunc("POST /api/sync/import", syncHandler.ImportAccessLogs)
 
 	return corsMiddleware(deps.AllowedOrigin, jsonMiddleware(mux))
 }

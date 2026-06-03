@@ -11,6 +11,7 @@ import (
 
 type AccessLogRepository interface {
 	Create(ctx context.Context, accessLog *domain.AccessLog) error
+	UpsertImported(ctx context.Context, accessLog *domain.AccessLog) error
 	List(ctx context.Context, filters domain.AccessLogFilters) ([]domain.AccessLog, error)
 	ListOpen(ctx context.Context) ([]domain.AccessLog, error)
 	FindByID(ctx context.Context, id int64) (*domain.AccessLog, error)
@@ -23,6 +24,7 @@ type AccessLogRepository interface {
 
 type SyncService interface {
 	RunOnce(ctx context.Context) error
+	ImportAccessLogs(ctx context.Context) (int, error)
 	Status(ctx context.Context) (SyncStatus, error)
 }
 

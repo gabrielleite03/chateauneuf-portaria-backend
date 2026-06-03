@@ -11,6 +11,7 @@ import (
 
 type SpreadsheetClient interface {
 	Ping(ctx context.Context) error
+	ReadAccessLogs(ctx context.Context) ([]domain.AccessLog, error)
 	AppendAccessLog(ctx context.Context, accessLog domain.AccessLog) error
 	AppendDiaristaEntry(ctx context.Context, entry domain.DiaristaEntry) error
 	AppendKeyRecord(ctx context.Context, key domain.KeyRecord) error
@@ -152,6 +153,30 @@ func (s *Service) RunOnce(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (s *Service) ImportAccessLogs(ctx context.Context) (int, error) {
+	if err := s.client.Ping(ctx); err != nil {
+		return 0, err
+	}
+
+	accessLogs, err := s.client.ReadAccessLogs(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	importedCount := 0
+	for index := range accessLogs {
+		if accessLogs[index].ID <= 0 {
+			continue
+		}
+		if err := s.repository.UpsertImported(ctx, &accessLogs[index]); err != nil {
+			return importedCount, err
+		}
+		importedCount++
+	}
+
+	return importedCount, nil
 }
 
 func (s *Service) Status(ctx context.Context) (usecase.SyncStatus, error) {

@@ -38,3 +38,22 @@ func (h *SyncHandler) Run(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, status)
 }
+
+func (h *SyncHandler) ImportAccessLogs(w http.ResponseWriter, r *http.Request) {
+	importedCount, err := h.service.ImportAccessLogs(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "erro ao importar historico da planilha", "INTERNAL_ERROR")
+		return
+	}
+
+	status, err := h.service.Status(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "erro ao consultar sincronizacao", "INTERNAL_ERROR")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"imported_count": importedCount,
+		"status":         status,
+	})
+}

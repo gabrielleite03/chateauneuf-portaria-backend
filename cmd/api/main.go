@@ -65,6 +65,16 @@ func main() {
 	defer stop()
 
 	syncService.Start(ctx, cfg.SyncInterval)
+	go func() {
+		importCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		importedCount, err := syncService.ImportAccessLogs(importCtx)
+		if err != nil {
+			logger.Warn("initial access log import failed", "error", err)
+			return
+		}
+		logger.Info("initial access log import finished", "imported_count", importedCount)
+	}()
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,

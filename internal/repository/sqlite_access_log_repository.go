@@ -50,6 +50,61 @@ func (r *SQLiteAccessLogRepository) Create(ctx context.Context, accessLog *domai
 	return nil
 }
 
+func (r *SQLiteAccessLogRepository) UpsertImported(ctx context.Context, accessLog *domain.AccessLog) error {
+	if accessLog.CreatedAt.IsZero() {
+		accessLog.CreatedAt = accessLog.EntryAt
+	}
+	if accessLog.UpdatedAt.IsZero() {
+		accessLog.UpdatedAt = accessLog.CreatedAt
+	}
+	if accessLog.SyncStatus == "" {
+		accessLog.SyncStatus = domain.SyncStatusSynced
+	}
+
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO access_logs (
+			id, external_id, visitor_name, document, company, phone, unit, resident_name,
+			service_type, vehicle_plate, authorized_by, doorman, photo, entry_at, exit_at,
+			visit_status, sync_status, sync_error, created_at, updated_at, synced_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			external_id = excluded.external_id,
+			visitor_name = excluded.visitor_name,
+			document = excluded.document,
+			company = excluded.company,
+			phone = excluded.phone,
+			unit = excluded.unit,
+			resident_name = excluded.resident_name,
+			service_type = excluded.service_type,
+			vehicle_plate = excluded.vehicle_plate,
+			authorized_by = excluded.authorized_by,
+			doorman = excluded.doorman,
+			photo = excluded.photo,
+			entry_at = excluded.entry_at,
+			exit_at = excluded.exit_at,
+			visit_status = excluded.visit_status,
+			sync_status = excluded.sync_status,
+			sync_error = excluded.sync_error,
+			created_at = excluded.created_at,
+			updated_at = excluded.updated_at,
+			synced_at = excluded.synced_at
+		WHERE access_logs.sync_status != ?
+	`,
+		accessLog.ID, accessLog.ExternalID, accessLog.VisitorName, accessLog.Document,
+		accessLog.Company, accessLog.Phone, accessLog.Unit, accessLog.ResidentName,
+		accessLog.ServiceType, accessLog.VehiclePlate, accessLog.AuthorizedBy,
+		accessLog.Doorman, accessLog.Photo, accessLog.EntryAt, accessLog.ExitAt,
+		accessLog.VisitStatus, accessLog.SyncStatus, accessLog.SyncError,
+		accessLog.CreatedAt, accessLog.UpdatedAt, accessLog.SyncedAt,
+		domain.SyncStatusPending,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert imported access log: %w", err)
+	}
+
+	return nil
+}
+
 func (r *SQLiteAccessLogRepository) List(ctx context.Context, filters domain.AccessLogFilters) ([]domain.AccessLog, error) {
 	query := `
 		SELECT id, external_id, visitor_name, document, company, phone, unit, resident_name,

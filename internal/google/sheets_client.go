@@ -180,6 +180,35 @@ func (c *SheetsClient) AppendAccessLog(ctx context.Context, accessLog domain.Acc
 	return nil
 }
 
+func (c *SheetsClient) ReadAccessLogs(ctx context.Context) ([]domain.AccessLog, error) {
+	if c.spreadsheetID == "" {
+		return nil, ErrSpreadsheetNotConfigured
+	}
+	if c.service == nil {
+		return nil, ErrCredentialsNotConfigured
+	}
+	if err := c.ensureHeaders(ctx); err != nil {
+		return nil, err
+	}
+
+	readRange := fmt.Sprintf("%s!A2:S", quoteSheetName(c.sheetName))
+	response, err := c.service.Spreadsheets.Values.Get(c.spreadsheetID, readRange).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("read access logs from sheets: %w", err)
+	}
+
+	accessLogs := make([]domain.AccessLog, 0, len(response.Values))
+	for _, row := range response.Values {
+		accessLog, ok := accessLogFromSheetRow(row)
+		if !ok {
+			continue
+		}
+		accessLogs = append(accessLogs, accessLog)
+	}
+
+	return accessLogs, nil
+}
+
 func (c *SheetsClient) AppendDiaristaEntry(ctx context.Context, entry domain.DiaristaEntry) error {
 	if c.spreadsheetID == "" {
 		return ErrSpreadsheetNotConfigured
@@ -414,6 +443,63 @@ func accessLogRow(accessLog domain.AccessLog, syncedAt time.Time) []interface{} 
 	}
 }
 
+func accessLogFromSheetRow(row []interface{}) (domain.AccessLog, bool) {
+	id, err := strconv.ParseInt(cell(row, 0), 10, 64)
+	if err != nil || id <= 0 {
+		return domain.AccessLog{}, false
+	}
+
+	entryAt, err := parseSheetDateTime(cell(row, 1), cell(row, 2))
+	if err != nil {
+		return domain.AccessLog{}, false
+	}
+
+	var exitAt *time.Time
+	if parsedExitAt, err := parseSheetDateTime(cell(row, 3), cell(row, 4)); err == nil {
+		exitAt = &parsedExitAt
+	}
+
+	visitStatus := domain.VisitStatus(cell(row, 15))
+	if !visitStatus.IsValid() {
+		if exitAt != nil {
+			visitStatus = domain.VisitStatusFinished
+		} else {
+			visitStatus = domain.VisitStatusInProgress
+		}
+	}
+
+	createdAt := parseSheetDateTimeOrDefault(cell(row, 16), "", entryAt)
+	syncedAtValue := parseSheetDateTimeOrDefault(cell(row, 17), "", time.Now())
+	updatedAt := syncedAtValue
+	if updatedAt.IsZero() {
+		updatedAt = createdAt
+	}
+
+	return domain.AccessLog{
+		ID:           id,
+		ExternalID:   "",
+		VisitorName:  cell(row, 5),
+		Document:     cell(row, 6),
+		Company:      cell(row, 7),
+		Phone:        cell(row, 8),
+		Unit:         cell(row, 9),
+		ResidentName: cell(row, 10),
+		ServiceType:  cell(row, 11),
+		VehiclePlate: cell(row, 12),
+		AuthorizedBy: cell(row, 13),
+		Doorman:      cell(row, 14),
+		Photo:        normalizeSheetPhoto(cell(row, 18)),
+		EntryAt:      entryAt,
+		ExitAt:       exitAt,
+		VisitStatus:  visitStatus,
+		SyncStatus:   domain.SyncStatusSynced,
+		SyncError:    "",
+		CreatedAt:    createdAt,
+		UpdatedAt:    updatedAt,
+		SyncedAt:     &syncedAtValue,
+	}, true
+}
+
 func diaristaRow(entry domain.DiaristaEntry, syncedAt time.Time) []interface{} {
 	return []interface{}{
 		entry.ID,
@@ -497,4 +583,66 @@ func formatTime(value time.Time) string {
 
 func formatDateTime(value time.Time) string {
 	return value.Format("02/01/2006 15:04:05")
+}
+
+func cell(row []interface{}, index int) string {
+	if index >= len(row) {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(row[index]))
+}
+
+func normalizeSheetPhoto(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "data:image/") || strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") {
+		return value
+	}
+	return ""
+}
+
+func parseSheetDateTimeOrDefault(dateValue string, timeValue string, fallback time.Time) time.Time {
+	parsed, err := parseSheetDateTime(dateValue, timeValue)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func parseSheetDateTime(dateValue string, timeValue string) (time.Time, error) {
+	dateValue = strings.TrimSpace(dateValue)
+	timeValue = strings.TrimSpace(timeValue)
+	if dateValue == "" {
+		return time.Time{}, fmt.Errorf("empty date")
+	}
+
+	if timeValue != "" {
+		for _, layout := range []string{
+			"02/01/2006 15:04:05",
+			"02/01/2006 15:04",
+			"2006-01-02 15:04:05",
+			"2006-01-02 15:04",
+		} {
+			parsed, err := time.ParseInLocation(layout, dateValue+" "+timeValue, time.Local)
+			if err == nil {
+				return parsed, nil
+			}
+		}
+	}
+
+	for _, layout := range []string{
+		time.RFC3339,
+		"02/01/2006 15:04:05",
+		"02/01/2006 15:04",
+		"02/01/2006",
+		"2006-01-02 15:04:05",
+		"2006-01-02 15:04",
+		"2006-01-02",
+	} {
+		parsed, err := time.ParseInLocation(layout, dateValue, time.Local)
+		if err == nil {
+			return parsed, nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("invalid date time: %s %s", dateValue, timeValue)
 }
