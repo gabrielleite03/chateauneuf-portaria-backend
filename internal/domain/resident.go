@@ -7,6 +7,7 @@ type Resident struct {
 	Owner         string     `json:"owner"`
 	Phones        string     `json:"phones"`
 	Tenant        string     `json:"tenant"`
+	TenantPhoto   string     `json:"tenantPhoto"`
 	FamilyMembers string     `json:"familyMembers"`
 	Photo         string     `json:"photo"`
 	SyncStatus    SyncStatus `json:"-"`

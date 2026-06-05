@@ -21,6 +21,7 @@ type UpsertResidentInput struct {
 	Owner         string `json:"owner"`
 	Phones        string `json:"phones"`
 	Tenant        string `json:"tenant"`
+	TenantPhoto   string `json:"tenantPhoto"`
 	FamilyMembers string `json:"familyMembers"`
 	Photo         string `json:"photo"`
 }
@@ -43,6 +44,7 @@ func (s *ResidentService) Upsert(ctx context.Context, input UpsertResidentInput)
 		Owner:         strings.TrimSpace(input.Owner),
 		Phones:        strings.TrimSpace(input.Phones),
 		Tenant:        strings.TrimSpace(input.Tenant),
+		TenantPhoto:   strings.TrimSpace(input.TenantPhoto),
 		FamilyMembers: strings.TrimSpace(input.FamilyMembers),
 		Photo:         strings.TrimSpace(input.Photo),
 		SyncStatus:    domain.SyncStatusSynced,

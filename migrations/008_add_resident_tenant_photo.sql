@@ -1,0 +1,1 @@
+ALTER TABLE residents ADD COLUMN tenant_photo TEXT NOT NULL DEFAULT '';
