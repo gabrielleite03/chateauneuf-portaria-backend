@@ -1,9 +1,16 @@
 package google
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/jpeg"
+	_ "image/png"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +36,7 @@ const (
 	diaristaSheetName         = "Diaristas"
 	keySheetName              = "Controle de Chaves"
 	scheduledServiceSheetName = "Servicos Agendados"
+	shoppingSheetName         = "Compras"
 )
 
 var accessLogHeaders = []interface{}{
@@ -97,6 +105,25 @@ var keyHeaders = []interface{}{
 	"Hora Devolucao",
 	"Porteiro",
 	"Status",
+	"Criado Em",
+	"Atualizado Em",
+	"Sincronizado Em",
+}
+
+var shoppingHeaders = []interface{}{
+	"ID Local",
+	"Apartamento",
+	"Entregador",
+	"Documento",
+	"Loja/Transportadora",
+	"Mercadoria",
+	"Observacoes",
+	"Data Recebimento",
+	"Hora Recebimento",
+	"Data Retirada",
+	"Hora Retirada",
+	"Status",
+	"Foto",
 	"Criado Em",
 	"Atualizado Em",
 	"Sincronizado Em",
@@ -323,6 +350,44 @@ func (c *SheetsClient) AppendScheduledService(ctx context.Context, service domai
 	return nil
 }
 
+func (c *SheetsClient) AppendShoppingDelivery(ctx context.Context, delivery domain.ShoppingDelivery) error {
+	if c.spreadsheetID == "" {
+		return ErrSpreadsheetNotConfigured
+	}
+	if c.service == nil {
+		return ErrCredentialsNotConfigured
+	}
+	if err := c.ensureShoppingHeaders(ctx); err != nil {
+		return err
+	}
+
+	row := shoppingRow(delivery, time.Now())
+	rowIndex, err := c.findRowByLocalID(ctx, shoppingSheetName, delivery.ID)
+	if err != nil {
+		return err
+	}
+	if rowIndex > 0 {
+		updateRange := fmt.Sprintf("%s!A%d:P%d", quoteSheetName(shoppingSheetName), rowIndex, rowIndex)
+		_, err := c.service.Spreadsheets.Values.Update(c.spreadsheetID, updateRange, &sheets.ValueRange{
+			Values: [][]interface{}{row},
+		}).ValueInputOption("USER_ENTERED").Context(ctx).Do()
+		if err != nil {
+			return fmt.Errorf("update shopping delivery in sheets: %w", err)
+		}
+		return nil
+	}
+
+	appendRange := fmt.Sprintf("%s!A:P", quoteSheetName(shoppingSheetName))
+	_, err = c.service.Spreadsheets.Values.Append(c.spreadsheetID, appendRange, &sheets.ValueRange{
+		Values: [][]interface{}{row},
+	}).ValueInputOption("USER_ENTERED").InsertDataOption("INSERT_ROWS").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("append shopping delivery to sheets: %w", err)
+	}
+
+	return nil
+}
+
 func (c *SheetsClient) ensureHeaders(ctx context.Context) error {
 	return c.ensureSheetHeaders(ctx, c.sheetName, accessLogHeaders, "A1:S1")
 }
@@ -337,6 +402,10 @@ func (c *SheetsClient) ensureKeyHeaders(ctx context.Context) error {
 
 func (c *SheetsClient) ensureScheduledServiceHeaders(ctx context.Context) error {
 	return c.ensureSheetHeaders(ctx, scheduledServiceSheetName, scheduledServiceHeaders, "A1:N1")
+}
+
+func (c *SheetsClient) ensureShoppingHeaders(ctx context.Context) error {
+	return c.ensureSheetHeaders(ctx, shoppingSheetName, shoppingHeaders, "A1:P1")
 }
 
 func (c *SheetsClient) ensureSheetHeaders(ctx context.Context, sheetName string, headers []interface{}, headerCells string) error {
@@ -439,7 +508,7 @@ func accessLogRow(accessLog domain.AccessLog, syncedAt time.Time) []interface{} 
 		string(accessLog.VisitStatus),
 		formatDateTime(accessLog.CreatedAt),
 		formatDateTime(syncedAt),
-		accessLog.Photo,
+		sheetPhotoValue(accessLog.Photo),
 	}
 }
 
@@ -511,7 +580,7 @@ func diaristaRow(entry domain.DiaristaEntry, syncedAt time.Time) []interface{} {
 		entry.EntryTime,
 		entry.ExitTime,
 		entry.Gatekeeper,
-		entry.Photo,
+		sheetPhotoValue(entry.Photo),
 		"Sincronizado",
 		formatDateTime(entry.CreatedAt),
 		formatDateTime(entry.UpdatedAt),
@@ -548,9 +617,30 @@ func scheduledServiceRow(service domain.ScheduledService, syncedAt time.Time) []
 		service.ArrivalTime,
 		service.Notes,
 		string(service.Status),
-		service.Photo,
+		sheetPhotoValue(service.Photo),
 		formatDateTime(service.CreatedAt),
 		formatDateTime(service.UpdatedAt),
+		formatDateTime(syncedAt),
+	}
+}
+
+func shoppingRow(delivery domain.ShoppingDelivery, syncedAt time.Time) []interface{} {
+	return []interface{}{
+		delivery.ID,
+		delivery.Unit,
+		delivery.CourierName,
+		delivery.Document,
+		delivery.Store,
+		delivery.Product,
+		delivery.Notes,
+		formatDate(delivery.ReceivedAt),
+		formatTime(delivery.ReceivedAt),
+		formatOptionalDate(delivery.WithdrawnAt),
+		formatOptionalTime(delivery.WithdrawnAt),
+		string(delivery.Status),
+		sheetPhotoValue(delivery.Photo),
+		formatDateTime(delivery.CreatedAt),
+		formatDateTime(delivery.UpdatedAt),
 		formatDateTime(syncedAt),
 	}
 }
@@ -598,6 +688,89 @@ func normalizeSheetPhoto(value string) string {
 		return value
 	}
 	return ""
+}
+
+func sheetPhotoValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if len(value) <= 45000 {
+		return value
+	}
+	if compressed := compressSheetPhoto(value); compressed != "" {
+		return compressed
+	}
+	return fmt.Sprintf("Foto salva localmente no sistema (base64 com %d caracteres excede o limite do Google Sheets).", len(value))
+}
+
+func compressSheetPhoto(value string) string {
+	header, encoded, found := strings.Cut(value, ",")
+	if !found || !strings.HasPrefix(header, "data:image/") {
+		return ""
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return ""
+	}
+
+	source, _, err := image.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return ""
+	}
+
+	for maxSide := 240; maxSide >= 80; maxSide -= 40 {
+		resized := resizeImage(source, maxSide)
+		for quality := 70; quality >= 35; quality -= 10 {
+			var out bytes.Buffer
+			if err := jpeg.Encode(&out, resized, &jpeg.Options{Quality: quality}); err != nil {
+				continue
+			}
+			result := "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(out.Bytes())
+			if len(result) <= 45000 {
+				return result
+			}
+		}
+	}
+	return ""
+}
+
+func resizeImage(source image.Image, maxSide int) image.Image {
+	bounds := source.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	if width <= 0 || height <= 0 {
+		return source
+	}
+	if width <= maxSide && height <= maxSide {
+		return flattenImage(source, width, height)
+	}
+
+	newWidth := maxSide
+	newHeight := maxSide
+	if width >= height {
+		newHeight = max(1, height*maxSide/width)
+	} else {
+		newWidth = max(1, width*maxSide/height)
+	}
+
+	target := image.NewRGBA(image.Rect(0, 0, newWidth, newHeight))
+	for y := 0; y < newHeight; y++ {
+		sourceY := bounds.Min.Y + y*height/newHeight
+		for x := 0; x < newWidth; x++ {
+			sourceX := bounds.Min.X + x*width/newWidth
+			target.Set(x, y, source.At(sourceX, sourceY))
+		}
+	}
+	return flattenImage(target, newWidth, newHeight)
+}
+
+func flattenImage(source image.Image, width int, height int) image.Image {
+	target := image.NewRGBA(image.Rect(0, 0, width, height))
+	draw.Draw(target, target.Bounds(), &image.Uniform{C: color.White}, image.Point{}, draw.Src)
+	draw.Draw(target, target.Bounds(), source, source.Bounds().Min, draw.Over)
+	return target
 }
 
 func parseSheetDateTimeOrDefault(dateValue string, timeValue string, fallback time.Time) time.Time {

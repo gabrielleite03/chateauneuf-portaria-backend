@@ -12,6 +12,7 @@ type RouterDeps struct {
 	KeyService       *usecase.KeyService
 	DiaristaService  *usecase.DiaristaService
 	ScheduledService *usecase.ScheduledServiceService
+	ShoppingService  *usecase.ShoppingService
 	SyncService      usecase.SyncService
 	AllowedOrigin    string
 }
@@ -22,6 +23,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 	keyHandler := NewKeyHandler(deps.KeyService)
 	diaristaHandler := NewDiaristaHandler(deps.DiaristaService)
 	scheduledServiceHandler := NewScheduledServiceHandler(deps.ScheduledService)
+	shoppingHandler := NewShoppingHandler(deps.ShoppingService)
 	syncHandler := NewSyncHandler(deps.SyncService)
 
 	mux := http.NewServeMux()
@@ -42,6 +44,9 @@ func NewRouter(deps RouterDeps) http.Handler {
 	mux.HandleFunc("POST /api/scheduled-services", scheduledServiceHandler.Create)
 	mux.HandleFunc("POST /api/scheduled-services/status", scheduledServiceHandler.UpdateStatus)
 	mux.HandleFunc("POST /api/scheduled-services/delete", scheduledServiceHandler.Delete)
+	mux.HandleFunc("GET /api/shopping", shoppingHandler.List)
+	mux.HandleFunc("POST /api/shopping", shoppingHandler.Create)
+	mux.HandleFunc("POST /api/shopping/withdraw", shoppingHandler.Withdraw)
 	mux.HandleFunc("GET /api/sync/status", syncHandler.Status)
 	mux.HandleFunc("POST /api/sync/run", syncHandler.Run)
 	mux.HandleFunc("POST /api/sync/import", syncHandler.ImportAccessLogs)

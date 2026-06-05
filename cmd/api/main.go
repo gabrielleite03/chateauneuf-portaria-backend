@@ -39,17 +39,19 @@ func main() {
 	keyRepo := repository.NewSQLiteKeyRepository(db)
 	diaristaRepo := repository.NewSQLiteDiaristaRepository(db)
 	scheduledServiceRepo := repository.NewSQLiteScheduledServiceRepository(db)
+	shoppingRepo := repository.NewSQLiteShoppingRepository(db)
 	sheetsClient, err := google.NewSheetsClient(context.Background(), cfg.GoogleSpreadsheetID, cfg.GoogleSheetName, cfg.GoogleCredentialsFile)
 	if err != nil {
 		logger.Error("failed to create google sheets client", "error", err)
 		os.Exit(1)
 	}
-	syncService := syncworker.NewService(accessLogRepo, diaristaRepo, keyRepo, scheduledServiceRepo, sheetsClient, logger)
+	syncService := syncworker.NewService(accessLogRepo, diaristaRepo, keyRepo, scheduledServiceRepo, shoppingRepo, sheetsClient, logger)
 	accessLogService := usecase.NewAccessLogService(accessLogRepo, syncService)
 	residentService := usecase.NewResidentService(residentRepo)
 	keyService := usecase.NewKeyService(keyRepo)
 	diaristaService := usecase.NewDiaristaService(diaristaRepo)
 	scheduledService := usecase.NewScheduledServiceService(scheduledServiceRepo)
+	shoppingService := usecase.NewShoppingService(shoppingRepo)
 
 	router := handler.NewRouter(handler.RouterDeps{
 		AccessLogService: accessLogService,
@@ -57,6 +59,7 @@ func main() {
 		KeyService:       keyService,
 		DiaristaService:  diaristaService,
 		ScheduledService: scheduledService,
+		ShoppingService:  shoppingService,
 		SyncService:      syncService,
 		AllowedOrigin:    cfg.AllowedOrigin,
 	})

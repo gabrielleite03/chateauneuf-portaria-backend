@@ -16,6 +16,7 @@ type SpreadsheetClient interface {
 	AppendDiaristaEntry(ctx context.Context, entry domain.DiaristaEntry) error
 	AppendKeyRecord(ctx context.Context, key domain.KeyRecord) error
 	AppendScheduledService(ctx context.Context, service domain.ScheduledService) error
+	AppendShoppingDelivery(ctx context.Context, delivery domain.ShoppingDelivery) error
 }
 
 type Service struct {
@@ -23,6 +24,7 @@ type Service struct {
 	diaristaRepository         DiaristaRepository
 	keyRepository              KeyRepository
 	scheduledServiceRepository ScheduledServiceRepository
+	shoppingRepository         ShoppingRepository
 	client                     SpreadsheetClient
 	logger                     *slog.Logger
 }
@@ -48,12 +50,20 @@ type ScheduledServiceRepository interface {
 	SyncStats(ctx context.Context) (int, error)
 }
 
-func NewService(repository usecase.AccessLogRepository, diaristaRepository DiaristaRepository, keyRepository KeyRepository, scheduledServiceRepository ScheduledServiceRepository, client SpreadsheetClient, logger *slog.Logger) *Service {
+type ShoppingRepository interface {
+	ListPendingSync(ctx context.Context, limit int) ([]domain.ShoppingDelivery, error)
+	MarkSynced(ctx context.Context, id string, syncedAt time.Time) error
+	MarkSyncError(ctx context.Context, id string, syncError string) error
+	SyncStats(ctx context.Context) (int, error)
+}
+
+func NewService(repository usecase.AccessLogRepository, diaristaRepository DiaristaRepository, keyRepository KeyRepository, scheduledServiceRepository ScheduledServiceRepository, shoppingRepository ShoppingRepository, client SpreadsheetClient, logger *slog.Logger) *Service {
 	return &Service{
 		repository:                 repository,
 		diaristaRepository:         diaristaRepository,
 		keyRepository:              keyRepository,
 		scheduledServiceRepository: scheduledServiceRepository,
+		shoppingRepository:         shoppingRepository,
 		client:                     client,
 		logger:                     logger,
 	}
@@ -152,6 +162,23 @@ func (s *Service) RunOnce(ctx context.Context) error {
 		}
 	}
 
+	if s.shoppingRepository != nil {
+		deliveries, err := s.shoppingRepository.ListPendingSync(ctx, 50)
+		if err != nil {
+			return err
+		}
+
+		for _, delivery := range deliveries {
+			if err := s.client.AppendShoppingDelivery(ctx, delivery); err != nil {
+				_ = s.shoppingRepository.MarkSyncError(ctx, delivery.ID, err.Error())
+				continue
+			}
+			if err := s.shoppingRepository.MarkSynced(ctx, delivery.ID, time.Now()); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -204,6 +231,13 @@ func (s *Service) Status(ctx context.Context) (usecase.SyncStatus, error) {
 			return usecase.SyncStatus{}, err
 		}
 		stats.PendingCount += scheduledPendingCount
+	}
+	if s.shoppingRepository != nil {
+		shoppingPendingCount, err := s.shoppingRepository.SyncStats(ctx)
+		if err != nil {
+			return usecase.SyncStatus{}, err
+		}
+		stats.PendingCount += shoppingPendingCount
 	}
 
 	pingErr := s.client.Ping(ctx)
