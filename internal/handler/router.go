@@ -2,28 +2,33 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
+	"chateauneuf-portaria-backend/internal/photos"
 	"chateauneuf-portaria-backend/internal/usecase"
 )
 
 type RouterDeps struct {
-	AccessLogService *usecase.AccessLogService
-	ResidentService  *usecase.ResidentService
-	KeyService       *usecase.KeyService
-	DiaristaService  *usecase.DiaristaService
-	ScheduledService *usecase.ScheduledServiceService
-	ShoppingService  *usecase.ShoppingService
-	SyncService      usecase.SyncService
-	AllowedOrigin    string
+	AccessLogService   *usecase.AccessLogService
+	ResidentService    *usecase.ResidentService
+	KeyService         *usecase.KeyService
+	DiaristaService    *usecase.DiaristaService
+	ScheduledService   *usecase.ScheduledServiceService
+	ShoppingService    *usecase.ShoppingService
+	ReservationService *usecase.ReservationService
+	SyncService        usecase.SyncService
+	PhotoStore         *photos.Store
+	AllowedOrigin      string
 }
 
 func NewRouter(deps RouterDeps) http.Handler {
-	accessLogHandler := NewAccessLogHandler(deps.AccessLogService)
+	accessLogHandler := NewAccessLogHandler(deps.AccessLogService, deps.PhotoStore)
 	residentHandler := NewResidentHandler(deps.ResidentService)
 	keyHandler := NewKeyHandler(deps.KeyService)
-	diaristaHandler := NewDiaristaHandler(deps.DiaristaService)
-	scheduledServiceHandler := NewScheduledServiceHandler(deps.ScheduledService)
-	shoppingHandler := NewShoppingHandler(deps.ShoppingService)
+	diaristaHandler := NewDiaristaHandler(deps.DiaristaService, deps.PhotoStore)
+	scheduledServiceHandler := NewScheduledServiceHandler(deps.ScheduledService, deps.PhotoStore)
+	shoppingHandler := NewShoppingHandler(deps.ShoppingService, deps.PhotoStore)
+	reservationHandler := NewReservationHandler(deps.ReservationService)
 	syncHandler := NewSyncHandler(deps.SyncService)
 
 	mux := http.NewServeMux()
@@ -47,15 +52,26 @@ func NewRouter(deps RouterDeps) http.Handler {
 	mux.HandleFunc("GET /api/shopping", shoppingHandler.List)
 	mux.HandleFunc("POST /api/shopping", shoppingHandler.Create)
 	mux.HandleFunc("POST /api/shopping/withdraw", shoppingHandler.Withdraw)
+	mux.HandleFunc("GET /api/reservations", reservationHandler.List)
+	mux.HandleFunc("POST /api/reservations", reservationHandler.Create)
+	mux.HandleFunc("POST /api/reservations/status", reservationHandler.UpdateStatus)
+	mux.HandleFunc("POST /api/reservations/delete", reservationHandler.Delete)
 	mux.HandleFunc("GET /api/sync/status", syncHandler.Status)
 	mux.HandleFunc("POST /api/sync/run", syncHandler.Run)
 	mux.HandleFunc("POST /api/sync/import", syncHandler.ImportAccessLogs)
+	if deps.PhotoStore != nil && deps.PhotoStore.Dir() != "" {
+		mux.Handle("GET /api/photos/", http.StripPrefix("/api/photos/", http.FileServer(http.Dir(deps.PhotoStore.Dir()))))
+	}
 
 	return corsMiddleware(deps.AllowedOrigin, jsonMiddleware(mux))
 }
 
 func jsonMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/photos/") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		next.ServeHTTP(w, r)
 	})

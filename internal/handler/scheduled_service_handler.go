@@ -4,15 +4,17 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"chateauneuf-portaria-backend/internal/photos"
 	"chateauneuf-portaria-backend/internal/usecase"
 )
 
 type ScheduledServiceHandler struct {
-	service *usecase.ScheduledServiceService
+	service    *usecase.ScheduledServiceService
+	photoStore *photos.Store
 }
 
-func NewScheduledServiceHandler(service *usecase.ScheduledServiceService) *ScheduledServiceHandler {
-	return &ScheduledServiceHandler{service: service}
+func NewScheduledServiceHandler(service *usecase.ScheduledServiceService, photoStore *photos.Store) *ScheduledServiceHandler {
+	return &ScheduledServiceHandler{service: service, photoStore: photoStore}
 }
 
 func (h *ScheduledServiceHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +46,14 @@ func (h *ScheduledServiceHandler) UpdateStatus(w http.ResponseWriter, r *http.Re
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		writeError(w, http.StatusBadRequest, "JSON invalido", "VALIDATION_ERROR")
 		return
+	}
+	if h.photoStore != nil {
+		photo, err := h.photoStore.SaveDataURL(r.Context(), "servicos-agendados", input.Photo)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "foto invalida", "VALIDATION_ERROR")
+			return
+		}
+		input.Photo = photo
 	}
 
 	service, err := h.service.UpdateStatus(r.Context(), input)

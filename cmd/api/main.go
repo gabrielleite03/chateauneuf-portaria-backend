@@ -13,6 +13,7 @@ import (
 	"chateauneuf-portaria-backend/internal/database"
 	"chateauneuf-portaria-backend/internal/google"
 	"chateauneuf-portaria-backend/internal/handler"
+	"chateauneuf-portaria-backend/internal/photos"
 	"chateauneuf-portaria-backend/internal/repository"
 	syncworker "chateauneuf-portaria-backend/internal/sync"
 	"chateauneuf-portaria-backend/internal/usecase"
@@ -40,7 +41,8 @@ func main() {
 	diaristaRepo := repository.NewSQLiteDiaristaRepository(db)
 	scheduledServiceRepo := repository.NewSQLiteScheduledServiceRepository(db)
 	shoppingRepo := repository.NewSQLiteShoppingRepository(db)
-	sheetsClient, err := google.NewSheetsClient(context.Background(), cfg.GoogleSpreadsheetID, cfg.GoogleSheetName, cfg.GoogleCredentialsFile)
+	reservationRepo := repository.NewSQLiteReservationRepository(db)
+	sheetsClient, err := google.NewSheetsClient(context.Background(), cfg.GoogleSpreadsheetID, cfg.GoogleSheetName, cfg.GoogleCredentialsFile, cfg.GoogleDriveFolderID)
 	if err != nil {
 		logger.Error("failed to create google sheets client", "error", err)
 		os.Exit(1)
@@ -52,16 +54,20 @@ func main() {
 	diaristaService := usecase.NewDiaristaService(diaristaRepo)
 	scheduledService := usecase.NewScheduledServiceService(scheduledServiceRepo)
 	shoppingService := usecase.NewShoppingService(shoppingRepo)
+	reservationService := usecase.NewReservationService(reservationRepo)
+	photoStore := photos.NewStore(cfg.PhotoStorageDir)
 
 	router := handler.NewRouter(handler.RouterDeps{
-		AccessLogService: accessLogService,
-		ResidentService:  residentService,
-		KeyService:       keyService,
-		DiaristaService:  diaristaService,
-		ScheduledService: scheduledService,
-		ShoppingService:  shoppingService,
-		SyncService:      syncService,
-		AllowedOrigin:    cfg.AllowedOrigin,
+		AccessLogService:   accessLogService,
+		ResidentService:    residentService,
+		KeyService:         keyService,
+		DiaristaService:    diaristaService,
+		ScheduledService:   scheduledService,
+		ShoppingService:    shoppingService,
+		ReservationService: reservationService,
+		SyncService:        syncService,
+		PhotoStore:         photoStore,
+		AllowedOrigin:      cfg.AllowedOrigin,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

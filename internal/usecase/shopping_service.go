@@ -40,12 +40,7 @@ func (s *ShoppingService) List(ctx context.Context) ([]domain.ShoppingDelivery, 
 }
 
 func (s *ShoppingService) Create(ctx context.Context, input CreateShoppingInput) (*domain.ShoppingDelivery, error) {
-	if strings.TrimSpace(input.Unit) == "" ||
-		strings.TrimSpace(input.CourierName) == "" ||
-		strings.TrimSpace(input.Document) == "" ||
-		strings.TrimSpace(input.Store) == "" ||
-		strings.TrimSpace(input.Product) == "" ||
-		strings.TrimSpace(input.Photo) == "" {
+	if strings.TrimSpace(input.Unit) == "" {
 		return nil, domain.ErrInvalidInput
 	}
 

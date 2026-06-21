@@ -7,15 +7,17 @@ import (
 	"strconv"
 
 	"chateauneuf-portaria-backend/internal/domain"
+	"chateauneuf-portaria-backend/internal/photos"
 	"chateauneuf-portaria-backend/internal/usecase"
 )
 
 type AccessLogHandler struct {
-	service *usecase.AccessLogService
+	service    *usecase.AccessLogService
+	photoStore *photos.Store
 }
 
-func NewAccessLogHandler(service *usecase.AccessLogService) *AccessLogHandler {
-	return &AccessLogHandler{service: service}
+func NewAccessLogHandler(service *usecase.AccessLogService, photoStore *photos.Store) *AccessLogHandler {
+	return &AccessLogHandler{service: service, photoStore: photoStore}
 }
 
 func (h *AccessLogHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -23,6 +25,14 @@ func (h *AccessLogHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		writeError(w, http.StatusBadRequest, "JSON invalido", "VALIDATION_ERROR")
 		return
+	}
+	if h.photoStore != nil {
+		photo, err := h.photoStore.SaveDataURL(r.Context(), "entradas", input.Photo)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "foto invalida", "VALIDATION_ERROR")
+			return
+		}
+		input.Photo = photo
 	}
 
 	accessLog, err := h.service.Create(r.Context(), input)

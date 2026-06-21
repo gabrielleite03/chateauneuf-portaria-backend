@@ -11,11 +11,16 @@ import (
 	"image/draw"
 	"image/jpeg"
 	_ "image/png"
+	"io"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"chateauneuf-portaria-backend/internal/domain"
+	"google.golang.org/api/drive/v3"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
 )
@@ -29,7 +34,9 @@ type SheetsClient struct {
 	spreadsheetID   string
 	sheetName       string
 	credentialsFile string
+	driveFolderID   string
 	service         *sheets.Service
+	driveService    *drive.Service
 }
 
 const (
@@ -129,11 +136,12 @@ var shoppingHeaders = []interface{}{
 	"Sincronizado Em",
 }
 
-func NewSheetsClient(ctx context.Context, spreadsheetID, sheetName, credentialsFile string) (*SheetsClient, error) {
+func NewSheetsClient(ctx context.Context, spreadsheetID, sheetName, credentialsFile string, driveFolderID string) (*SheetsClient, error) {
 	client := &SheetsClient{
 		spreadsheetID:   spreadsheetID,
 		sheetName:       sheetName,
 		credentialsFile: credentialsFile,
+		driveFolderID:   driveFolderID,
 	}
 
 	if spreadsheetID == "" {
@@ -143,11 +151,24 @@ func NewSheetsClient(ctx context.Context, spreadsheetID, sheetName, credentialsF
 		return client, nil
 	}
 
-	service, err := sheets.NewService(ctx, option.WithCredentialsFile(credentialsFile))
+	options := []option.ClientOption{
+		option.WithCredentialsFile(credentialsFile),
+		option.WithScopes(sheets.SpreadsheetsScope, drive.DriveFileScope),
+	}
+
+	service, err := sheets.NewService(ctx, options...)
 	if err != nil {
 		return nil, fmt.Errorf("create sheets service: %w", err)
 	}
 	client.service = service
+
+	if driveFolderID != "" {
+		driveService, err := drive.NewService(ctx, options...)
+		if err != nil {
+			return nil, fmt.Errorf("create drive service: %w", err)
+		}
+		client.driveService = driveService
+	}
 	return client, nil
 }
 
@@ -180,7 +201,11 @@ func (c *SheetsClient) AppendAccessLog(ctx context.Context, accessLog domain.Acc
 		return err
 	}
 
-	row := accessLogRow(accessLog, time.Now())
+	photoCell, err := c.photoCell(ctx, "entradas", strconv.FormatInt(accessLog.ID, 10), accessLog.VisitorName, accessLog.EntryAt, accessLog.Photo)
+	if err != nil {
+		return err
+	}
+	row := accessLogRow(accessLog, time.Now(), photoCell)
 	rowIndex, err := c.findRowByLocalID(ctx, c.sheetName, strconv.FormatInt(accessLog.ID, 10))
 	if err != nil {
 		return err
@@ -247,7 +272,11 @@ func (c *SheetsClient) AppendDiaristaEntry(ctx context.Context, entry domain.Dia
 		return err
 	}
 
-	row := diaristaRow(entry, time.Now())
+	photoCell, err := c.photoCell(ctx, "diaristas", entry.ID, entry.Name, entry.CreatedAt, entry.Photo)
+	if err != nil {
+		return err
+	}
+	row := diaristaRow(entry, time.Now(), photoCell)
 	rowIndex, err := c.findRowByLocalID(ctx, diaristaSheetName, entry.ID)
 	if err != nil {
 		return err
@@ -323,7 +352,11 @@ func (c *SheetsClient) AppendScheduledService(ctx context.Context, service domai
 		return err
 	}
 
-	row := scheduledServiceRow(service, time.Now())
+	photoCell, err := c.photoCell(ctx, "servicos-agendados", service.ID, service.Name, service.CreatedAt, service.Photo)
+	if err != nil {
+		return err
+	}
+	row := scheduledServiceRow(service, time.Now(), photoCell)
 	rowIndex, err := c.findRowByLocalID(ctx, scheduledServiceSheetName, service.ID)
 	if err != nil {
 		return err
@@ -361,7 +394,11 @@ func (c *SheetsClient) AppendShoppingDelivery(ctx context.Context, delivery doma
 		return err
 	}
 
-	row := shoppingRow(delivery, time.Now())
+	photoCell, err := c.photoCell(ctx, "compras", delivery.ID, delivery.Product, delivery.ReceivedAt, delivery.Photo)
+	if err != nil {
+		return err
+	}
+	row := shoppingRow(delivery, time.Now(), photoCell)
 	rowIndex, err := c.findRowByLocalID(ctx, shoppingSheetName, delivery.ID)
 	if err != nil {
 		return err
@@ -488,7 +525,7 @@ func (c *SheetsClient) findRowByLocalID(ctx context.Context, sheetName string, t
 	return 0, nil
 }
 
-func accessLogRow(accessLog domain.AccessLog, syncedAt time.Time) []interface{} {
+func accessLogRow(accessLog domain.AccessLog, syncedAt time.Time, photoCell string) []interface{} {
 	return []interface{}{
 		accessLog.ID,
 		formatDate(accessLog.EntryAt),
@@ -508,7 +545,7 @@ func accessLogRow(accessLog domain.AccessLog, syncedAt time.Time) []interface{} 
 		string(accessLog.VisitStatus),
 		formatDateTime(accessLog.CreatedAt),
 		formatDateTime(syncedAt),
-		sheetPhotoValue(accessLog.Photo),
+		photoCell,
 	}
 }
 
@@ -569,7 +606,7 @@ func accessLogFromSheetRow(row []interface{}) (domain.AccessLog, bool) {
 	}, true
 }
 
-func diaristaRow(entry domain.DiaristaEntry, syncedAt time.Time) []interface{} {
+func diaristaRow(entry domain.DiaristaEntry, syncedAt time.Time, photoCell string) []interface{} {
 	return []interface{}{
 		entry.ID,
 		entry.Date,
@@ -580,7 +617,7 @@ func diaristaRow(entry domain.DiaristaEntry, syncedAt time.Time) []interface{} {
 		entry.EntryTime,
 		entry.ExitTime,
 		entry.Gatekeeper,
-		sheetPhotoValue(entry.Photo),
+		photoCell,
 		"Sincronizado",
 		formatDateTime(entry.CreatedAt),
 		formatDateTime(entry.UpdatedAt),
@@ -605,7 +642,7 @@ func keyRow(key domain.KeyRecord, syncedAt time.Time) []interface{} {
 	}
 }
 
-func scheduledServiceRow(service domain.ScheduledService, syncedAt time.Time) []interface{} {
+func scheduledServiceRow(service domain.ScheduledService, syncedAt time.Time, photoCell string) []interface{} {
 	return []interface{}{
 		service.ID,
 		service.Date,
@@ -617,14 +654,14 @@ func scheduledServiceRow(service domain.ScheduledService, syncedAt time.Time) []
 		service.ArrivalTime,
 		service.Notes,
 		string(service.Status),
-		sheetPhotoValue(service.Photo),
+		photoCell,
 		formatDateTime(service.CreatedAt),
 		formatDateTime(service.UpdatedAt),
 		formatDateTime(syncedAt),
 	}
 }
 
-func shoppingRow(delivery domain.ShoppingDelivery, syncedAt time.Time) []interface{} {
+func shoppingRow(delivery domain.ShoppingDelivery, syncedAt time.Time, photoCell string) []interface{} {
 	return []interface{}{
 		delivery.ID,
 		delivery.Unit,
@@ -638,11 +675,170 @@ func shoppingRow(delivery domain.ShoppingDelivery, syncedAt time.Time) []interfa
 		formatOptionalDate(delivery.WithdrawnAt),
 		formatOptionalTime(delivery.WithdrawnAt),
 		string(delivery.Status),
-		sheetPhotoValue(delivery.Photo),
+		photoCell,
 		formatDateTime(delivery.CreatedAt),
 		formatDateTime(delivery.UpdatedAt),
 		formatDateTime(syncedAt),
 	}
+}
+
+func (c *SheetsClient) photoCell(ctx context.Context, category string, localID string, label string, capturedAt time.Time, value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+
+	fallback := sheetPhotoValue(value)
+	if c.driveService == nil || c.driveFolderID == "" {
+		return fallback, nil
+	}
+	if !strings.HasPrefix(value, "data:image/") {
+		return fallback, nil
+	}
+
+	link, err := c.uploadDrivePhoto(ctx, category, localID, label, capturedAt, value)
+	if err != nil {
+		return "", err
+	}
+	return link, nil
+}
+
+func (c *SheetsClient) uploadDrivePhoto(ctx context.Context, category string, localID string, label string, capturedAt time.Time, dataURL string) (string, error) {
+	contentType, raw, err := decodeImageDataURL(dataURL)
+	if err != nil {
+		return "", err
+	}
+
+	if capturedAt.IsZero() {
+		capturedAt = time.Now()
+	}
+
+	name := drivePhotoName(category, localID, label, capturedAt, contentType)
+	if link, err := c.findDrivePhoto(ctx, name); err == nil && link != "" {
+		return link, nil
+	}
+
+	file := &drive.File{
+		Name:     name,
+		MimeType: contentType,
+		Parents:  []string{c.driveFolderID},
+	}
+
+	created, err := c.driveService.Files.Create(file).
+		Media(bytes.NewReader(raw), googleapi.ContentType(contentType)).
+		Fields("id").
+		SupportsAllDrives(true).
+		Context(ctx).
+		Do()
+	if err != nil {
+		return "", fmt.Errorf("upload photo to drive: %w", err)
+	}
+	if strings.TrimSpace(created.Id) != "" {
+		if err := c.ensureDrivePhotoReadable(ctx, created.Id); err != nil {
+			return "", err
+		}
+		return driveFileURL(created.Id), nil
+	}
+	return "", fmt.Errorf("drive did not return file link")
+}
+
+func (c *SheetsClient) findDrivePhoto(ctx context.Context, name string) (string, error) {
+	query := fmt.Sprintf("name = '%s' and '%s' in parents and trashed = false", escapeDriveQuery(name), escapeDriveQuery(c.driveFolderID))
+	response, err := c.driveService.Files.List().
+		Q(query).
+		PageSize(1).
+		Fields("files(id)").
+		SupportsAllDrives(true).
+		Context(ctx).
+		Do()
+	if err != nil {
+		return "", err
+	}
+	if len(response.Files) == 0 {
+		return "", nil
+	}
+	if strings.TrimSpace(response.Files[0].Id) != "" {
+		if err := c.ensureDrivePhotoReadable(ctx, response.Files[0].Id); err != nil {
+			return "", err
+		}
+		return driveFileURL(response.Files[0].Id), nil
+	}
+	return "", nil
+}
+
+func (c *SheetsClient) ensureDrivePhotoReadable(ctx context.Context, fileID string) error {
+	_, err := c.driveService.Permissions.Create(fileID, &drive.Permission{
+		Type: "anyone",
+		Role: "reader",
+	}).Fields("id").SupportsAllDrives(true).Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("share drive photo link: %w", err)
+	}
+	return nil
+}
+
+func driveFileURL(id string) string {
+	return "https://drive.google.com/uc?export=view&id=" + id
+}
+
+func decodeImageDataURL(value string) (string, []byte, error) {
+	header, encoded, found := strings.Cut(strings.TrimSpace(value), ",")
+	if !found || !strings.HasPrefix(header, "data:image/") {
+		return "", nil, fmt.Errorf("photo is not an image data URL")
+	}
+	contentType := strings.TrimPrefix(header, "data:")
+	if mediaType, _, found := strings.Cut(contentType, ";"); found {
+		contentType = mediaType
+	}
+	raw, err := io.ReadAll(base64.NewDecoder(base64.StdEncoding, strings.NewReader(encoded)))
+	if err != nil {
+		return "", nil, fmt.Errorf("decode photo: %w", err)
+	}
+	return contentType, raw, nil
+}
+
+func drivePhotoName(category string, localID string, label string, capturedAt time.Time, contentType string) string {
+	ext := ".jpg"
+	switch contentType {
+	case "image/png":
+		ext = ".png"
+	case "image/webp":
+		ext = ".webp"
+	case "image/gif":
+		ext = ".gif"
+	}
+
+	parts := []string{
+		capturedAt.Format("20060102-150405"),
+		sanitizeDriveName(category),
+		sanitizeDriveName(localID),
+		sanitizeDriveName(label),
+	}
+	return strings.Trim(strings.Join(nonEmpty(parts), "-"), "-") + ext
+}
+
+func sanitizeDriveName(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = regexp.MustCompile(`[^a-z0-9._-]+`).ReplaceAllString(value, "-")
+	value = strings.Trim(value, "-_.")
+	if value == "" {
+		return "foto"
+	}
+	return strings.TrimSuffix(value, filepath.Ext(value))
+}
+
+func nonEmpty(values []string) []string {
+	filtered := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			filtered = append(filtered, value)
+		}
+	}
+	return filtered
+}
+
+func escapeDriveQuery(value string) string {
+	return strings.ReplaceAll(value, "'", `\'`)
 }
 
 func quoteSheetName(name string) string {

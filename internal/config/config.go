@@ -16,6 +16,8 @@ type Config struct {
 	GoogleSpreadsheetID   string
 	GoogleCredentialsFile string
 	GoogleSheetName       string
+	GoogleDriveFolderID   string
+	PhotoStorageDir       string
 	SyncInterval          time.Duration
 }
 
@@ -30,6 +32,8 @@ func Load() Config {
 		GoogleSpreadsheetID:   envFirst([]string{"GOOGLE_SHEET_ID", "GOOGLE_SPREADSHEET_ID"}, ""),
 		GoogleCredentialsFile: env("GOOGLE_CREDENTIALS_FILE", ""),
 		GoogleSheetName:       env("GOOGLE_SHEET_NAME", "Entradas"),
+		GoogleDriveFolderID:   env("GOOGLE_DRIVE_FOLDER_ID", ""),
+		PhotoStorageDir:       env("PHOTO_STORAGE_DIR", "data/photos"),
 		SyncInterval:          time.Duration(envInt("SYNC_INTERVAL_SECONDS", 30)) * time.Second,
 	}
 }
