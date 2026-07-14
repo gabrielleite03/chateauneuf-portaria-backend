@@ -6,6 +6,7 @@ import (
 
 	"chateauneuf-portaria-backend/internal/photos"
 	"chateauneuf-portaria-backend/internal/usecase"
+	"chateauneuf-portaria-backend/internal/version"
 )
 
 type RouterDeps struct {
@@ -59,6 +60,9 @@ func NewRouter(deps RouterDeps) http.Handler {
 	mux.HandleFunc("GET /api/sync/status", syncHandler.Status)
 	mux.HandleFunc("POST /api/sync/run", syncHandler.Run)
 	mux.HandleFunc("POST /api/sync/import", syncHandler.ImportAccessLogs)
+	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, version.Current())
+	})
 	if deps.PhotoStore != nil && deps.PhotoStore.Dir() != "" {
 		mux.Handle("GET /api/photos/", http.StripPrefix("/api/photos/", http.FileServer(http.Dir(deps.PhotoStore.Dir()))))
 	}

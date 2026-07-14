@@ -6,7 +6,11 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /out/chateauneuf-portaria-api ./cmd/api
+ARG APP_VERSION=dev
+ARG GIT_COMMIT=unknown
+RUN CGO_ENABLED=0 GOOS=linux go build \
+  -ldflags="-X chateauneuf-portaria-backend/internal/version.Version=${APP_VERSION} -X chateauneuf-portaria-backend/internal/version.Commit=${GIT_COMMIT}" \
+  -o /out/chateauneuf-portaria-api ./cmd/api
 
 FROM gcr.io/distroless/static-debian12:nonroot
 
