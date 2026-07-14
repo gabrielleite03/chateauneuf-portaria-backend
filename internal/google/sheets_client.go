@@ -68,6 +68,7 @@ var accessLogHeaders = []interface{}{
 	"Criado Em",
 	"Sincronizado Em",
 	"Foto",
+	"ID Global",
 }
 
 var diaristaHeaders = []interface{}{
@@ -220,12 +221,12 @@ func (c *SheetsClient) AppendAccessLog(ctx context.Context, accessLog domain.Acc
 		return err
 	}
 	row := accessLogRow(accessLog, time.Now(), photoCell)
-	rowIndex, err := c.findRowByLocalID(ctx, c.sheetName, strconv.FormatInt(accessLog.ID, 10))
+	rowIndex, err := c.findAccessLogRow(ctx, accessLog)
 	if err != nil {
 		return err
 	}
 	if rowIndex > 0 {
-		updateRange := fmt.Sprintf("%s!A%d:S%d", quoteSheetName(c.sheetName), rowIndex, rowIndex)
+		updateRange := fmt.Sprintf("%s!A%d:T%d", quoteSheetName(c.sheetName), rowIndex, rowIndex)
 		_, err := c.service.Spreadsheets.Values.Update(c.spreadsheetID, updateRange, &sheets.ValueRange{
 			Values: [][]interface{}{row},
 		}).ValueInputOption("USER_ENTERED").Context(ctx).Do()
@@ -235,7 +236,7 @@ func (c *SheetsClient) AppendAccessLog(ctx context.Context, accessLog domain.Acc
 		return nil
 	}
 
-	appendRange := fmt.Sprintf("%s!A:S", quoteSheetName(c.sheetName))
+	appendRange := fmt.Sprintf("%s!A:T", quoteSheetName(c.sheetName))
 	_, err = c.service.Spreadsheets.Values.Append(c.spreadsheetID, appendRange, &sheets.ValueRange{
 		Values: [][]interface{}{row},
 	}).ValueInputOption("USER_ENTERED").InsertDataOption("INSERT_ROWS").Context(ctx).Do()
@@ -257,7 +258,7 @@ func (c *SheetsClient) ReadAccessLogs(ctx context.Context) ([]domain.AccessLog, 
 		return nil, err
 	}
 
-	readRange := fmt.Sprintf("%s!A2:S", quoteSheetName(c.sheetName))
+	readRange := fmt.Sprintf("%s!A2:T", quoteSheetName(c.sheetName))
 	response, err := c.service.Spreadsheets.Values.Get(c.spreadsheetID, readRange).Context(ctx).Do()
 	if err != nil {
 		return nil, fmt.Errorf("read access logs from sheets: %w", err)
@@ -520,7 +521,7 @@ func (c *SheetsClient) AppendShoppingDelivery(ctx context.Context, delivery doma
 }
 
 func (c *SheetsClient) ensureHeaders(ctx context.Context) error {
-	return c.ensureSheetHeaders(ctx, c.sheetName, accessLogHeaders, "A1:S1")
+	return c.ensureSheetHeaders(ctx, c.sheetName, accessLogHeaders, "A1:T1")
 }
 
 func (c *SheetsClient) ensureDiaristaHeaders(ctx context.Context) error {
@@ -605,17 +606,35 @@ func headersMatch(current []interface{}, expected []interface{}) bool {
 }
 
 func (c *SheetsClient) findRowByLocalID(ctx context.Context, sheetName string, targetID string) (int, error) {
-	readRange := fmt.Sprintf("%s!A:A", quoteSheetName(sheetName))
+	return c.findRowByColumnValue(ctx, sheetName, "A", targetID)
+}
+
+func (c *SheetsClient) findAccessLogRow(ctx context.Context, accessLog domain.AccessLog) (int, error) {
+	if strings.TrimSpace(accessLog.ExternalID) != "" {
+		rowIndex, err := c.findRowByColumnValue(ctx, c.sheetName, "T", accessLog.ExternalID)
+		if err != nil {
+			return 0, err
+		}
+		if rowIndex > 0 {
+			return rowIndex, nil
+		}
+	}
+	return c.findRowByLocalID(ctx, c.sheetName, strconv.FormatInt(accessLog.ID, 10))
+}
+
+func (c *SheetsClient) findRowByColumnValue(ctx context.Context, sheetName string, column string, targetValue string) (int, error) {
+	readRange := fmt.Sprintf("%s!%s:%s", quoteSheetName(sheetName), column, column)
 	response, err := c.service.Spreadsheets.Values.Get(c.spreadsheetID, readRange).Context(ctx).Do()
 	if err != nil {
-		return 0, fmt.Errorf("read sheets local ids: %w", err)
+		return 0, fmt.Errorf("read sheets column %s: %w", column, err)
 	}
 
+	targetValue = strings.TrimSpace(targetValue)
 	for index, row := range response.Values {
 		if len(row) == 0 {
 			continue
 		}
-		if strings.TrimSpace(fmt.Sprint(row[0])) == targetID {
+		if strings.TrimSpace(fmt.Sprint(row[0])) == targetValue {
 			return index + 1, nil
 		}
 	}
@@ -644,6 +663,7 @@ func accessLogRow(accessLog domain.AccessLog, syncedAt time.Time, photoCell stri
 		formatDateTime(accessLog.CreatedAt),
 		formatDateTime(syncedAt),
 		photoCell,
+		accessLog.ExternalID,
 	}
 }
 
@@ -681,7 +701,7 @@ func accessLogFromSheetRow(row []interface{}) (domain.AccessLog, bool) {
 
 	return domain.AccessLog{
 		ID:           id,
-		ExternalID:   "",
+		ExternalID:   cell(row, 19),
 		VisitorName:  cell(row, 5),
 		Document:     cell(row, 6),
 		Company:      cell(row, 7),

@@ -2,7 +2,10 @@ package usecase
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -68,7 +71,7 @@ func (s *AccessLogService) Create(ctx context.Context, input CreateAccessLogInpu
 	}
 
 	accessLog := &domain.AccessLog{
-		ExternalID:   "",
+		ExternalID:   newAccessLogExternalID(),
 		VisitorName:  strings.TrimSpace(input.VisitorName),
 		Document:     strings.TrimSpace(input.Document),
 		Company:      strings.TrimSpace(input.Company),
@@ -96,6 +99,14 @@ func (s *AccessLogService) Create(ctx context.Context, input CreateAccessLogInpu
 	}(accessLog.ID)
 
 	return accessLog, nil
+}
+
+func newAccessLogExternalID() string {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return fmt.Sprintf("visit-%d", time.Now().UnixNano())
+	}
+	return "visit-" + hex.EncodeToString(raw[:])
 }
 
 func (s *AccessLogService) List(ctx context.Context, filters domain.AccessLogFilters) ([]domain.AccessLog, error) {

@@ -61,6 +61,28 @@ func (r *SQLiteAccessLogRepository) UpsertImported(ctx context.Context, accessLo
 		accessLog.SyncStatus = domain.SyncStatusSynced
 	}
 
+	if strings.TrimSpace(accessLog.ExternalID) != "" {
+		var existingID int64
+		err := r.db.QueryRowContext(ctx, `
+			SELECT id
+			FROM access_logs
+			WHERE external_id = ?
+			LIMIT 1
+		`, strings.TrimSpace(accessLog.ExternalID)).Scan(&existingID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("find imported access log by external id: %w", err)
+		}
+		if existingID > 0 {
+			accessLog.ID = existingID
+			return r.upsertImportedByID(ctx, accessLog)
+		}
+		return r.insertImportedWithoutID(ctx, accessLog)
+	}
+
+	return r.upsertImportedByID(ctx, accessLog)
+}
+
+func (r *SQLiteAccessLogRepository) upsertImportedByID(ctx context.Context, accessLog *domain.AccessLog) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO access_logs (
 			id, external_id, visitor_name, document, company, phone, unit, resident_name,
@@ -102,6 +124,27 @@ func (r *SQLiteAccessLogRepository) UpsertImported(ctx context.Context, accessLo
 		return fmt.Errorf("upsert imported access log: %w", err)
 	}
 
+	return nil
+}
+
+func (r *SQLiteAccessLogRepository) insertImportedWithoutID(ctx context.Context, accessLog *domain.AccessLog) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO access_logs (
+			external_id, visitor_name, document, company, phone, unit, resident_name,
+			service_type, vehicle_plate, authorized_by, doorman, photo, entry_at, exit_at,
+			visit_status, sync_status, sync_error, created_at, updated_at, synced_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		accessLog.ExternalID, accessLog.VisitorName, accessLog.Document,
+		accessLog.Company, accessLog.Phone, accessLog.Unit, accessLog.ResidentName,
+		accessLog.ServiceType, accessLog.VehiclePlate, accessLog.AuthorizedBy,
+		accessLog.Doorman, accessLog.Photo, accessLog.EntryAt, accessLog.ExitAt,
+		accessLog.VisitStatus, accessLog.SyncStatus, accessLog.SyncError,
+		accessLog.CreatedAt, accessLog.UpdatedAt, accessLog.SyncedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("insert imported access log without id: %w", err)
+	}
 	return nil
 }
 
@@ -169,11 +212,13 @@ func (r *SQLiteAccessLogRepository) FindByID(ctx context.Context, id int64) (*do
 }
 
 func (r *SQLiteAccessLogRepository) Checkout(ctx context.Context, id int64, exitAt time.Time) (*domain.AccessLog, error) {
+	externalID := fmt.Sprintf("visit-%d-%d", id, exitAt.UnixNano())
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE access_logs
-		SET exit_at = ?, visit_status = ?, sync_status = ?, sync_error = '', updated_at = ?
+		SET external_id = CASE WHEN external_id = '' THEN ? ELSE external_id END,
+			exit_at = ?, visit_status = ?, sync_status = ?, sync_error = '', updated_at = ?
 		WHERE id = ? AND exit_at IS NULL
-	`, exitAt, domain.VisitStatusFinished, domain.SyncStatusPending, time.Now(), id)
+	`, externalID, exitAt, domain.VisitStatusFinished, domain.SyncStatusPending, time.Now(), id)
 	if err != nil {
 		return nil, fmt.Errorf("checkout access log: %w", err)
 	}
