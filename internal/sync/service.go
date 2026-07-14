@@ -12,7 +12,9 @@ import (
 type SpreadsheetClient interface {
 	Ping(ctx context.Context) error
 	ReadAccessLogs(ctx context.Context) ([]domain.AccessLog, error)
+	ReadResidents(ctx context.Context) ([]domain.Resident, error)
 	AppendAccessLog(ctx context.Context, accessLog domain.AccessLog) error
+	AppendResident(ctx context.Context, resident domain.Resident) error
 	AppendDiaristaEntry(ctx context.Context, entry domain.DiaristaEntry) error
 	AppendKeyRecord(ctx context.Context, key domain.KeyRecord) error
 	AppendScheduledService(ctx context.Context, service domain.ScheduledService) error
@@ -23,6 +25,7 @@ type Service struct {
 	repository                 usecase.AccessLogRepository
 	diaristaRepository         DiaristaRepository
 	keyRepository              KeyRepository
+	residentRepository         ResidentRepository
 	scheduledServiceRepository ScheduledServiceRepository
 	shoppingRepository         ShoppingRepository
 	client                     SpreadsheetClient
@@ -43,6 +46,14 @@ type KeyRepository interface {
 	SyncStats(ctx context.Context) (int, error)
 }
 
+type ResidentRepository interface {
+	UpsertImported(ctx context.Context, resident domain.Resident) (*domain.Resident, error)
+	ListPendingSync(ctx context.Context, limit int) ([]domain.Resident, error)
+	MarkSynced(ctx context.Context, unit string, syncedAt time.Time) error
+	MarkSyncError(ctx context.Context, unit string, syncError string) error
+	SyncStats(ctx context.Context) (int, error)
+}
+
 type ScheduledServiceRepository interface {
 	ListPendingSync(ctx context.Context, limit int) ([]domain.ScheduledService, error)
 	MarkSynced(ctx context.Context, id string, syncedAt time.Time) error
@@ -57,11 +68,12 @@ type ShoppingRepository interface {
 	SyncStats(ctx context.Context) (int, error)
 }
 
-func NewService(repository usecase.AccessLogRepository, diaristaRepository DiaristaRepository, keyRepository KeyRepository, scheduledServiceRepository ScheduledServiceRepository, shoppingRepository ShoppingRepository, client SpreadsheetClient, logger *slog.Logger) *Service {
+func NewService(repository usecase.AccessLogRepository, diaristaRepository DiaristaRepository, keyRepository KeyRepository, residentRepository ResidentRepository, scheduledServiceRepository ScheduledServiceRepository, shoppingRepository ShoppingRepository, client SpreadsheetClient, logger *slog.Logger) *Service {
 	return &Service{
 		repository:                 repository,
 		diaristaRepository:         diaristaRepository,
 		keyRepository:              keyRepository,
+		residentRepository:         residentRepository,
 		scheduledServiceRepository: scheduledServiceRepository,
 		shoppingRepository:         shoppingRepository,
 		client:                     client,
@@ -108,6 +120,26 @@ func (s *Service) RunOnce(ctx context.Context) error {
 		}
 		if err := s.repository.MarkSynced(ctx, accessLog.ID, time.Now()); err != nil {
 			return err
+		}
+	}
+
+	if s.residentRepository != nil {
+		residents, err := s.residentRepository.ListPendingSync(ctx, 50)
+		if err != nil {
+			return err
+		}
+
+		for _, resident := range residents {
+			if err := s.client.AppendResident(ctx, resident); err != nil {
+				_ = s.residentRepository.MarkSyncError(ctx, resident.Unit, err.Error())
+				continue
+			}
+			if err := s.residentRepository.MarkSynced(ctx, resident.Unit, time.Now()); err != nil {
+				return err
+			}
+		}
+		if _, err := s.ImportResidents(ctx); err != nil {
+			s.logger.Warn("resident import failed", "error", err)
 		}
 	}
 
@@ -206,6 +238,33 @@ func (s *Service) ImportAccessLogs(ctx context.Context) (int, error) {
 	return importedCount, nil
 }
 
+func (s *Service) ImportResidents(ctx context.Context) (int, error) {
+	if s.residentRepository == nil {
+		return 0, nil
+	}
+	if err := s.client.Ping(ctx); err != nil {
+		return 0, err
+	}
+
+	residents, err := s.client.ReadResidents(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	importedCount := 0
+	for index := range residents {
+		if residents[index].Unit == "" {
+			continue
+		}
+		if _, err := s.residentRepository.UpsertImported(ctx, residents[index]); err != nil {
+			return importedCount, err
+		}
+		importedCount++
+	}
+
+	return importedCount, nil
+}
+
 func (s *Service) Status(ctx context.Context) (usecase.SyncStatus, error) {
 	stats, err := s.repository.SyncStats(ctx)
 	if err != nil {
@@ -224,6 +283,13 @@ func (s *Service) Status(ctx context.Context) (usecase.SyncStatus, error) {
 			return usecase.SyncStatus{}, err
 		}
 		stats.PendingCount += keyPendingCount
+	}
+	if s.residentRepository != nil {
+		residentPendingCount, err := s.residentRepository.SyncStats(ctx)
+		if err != nil {
+			return usecase.SyncStatus{}, err
+		}
+		stats.PendingCount += residentPendingCount
 	}
 	if s.scheduledServiceRepository != nil {
 		scheduledPendingCount, err := s.scheduledServiceRepository.SyncStats(ctx)

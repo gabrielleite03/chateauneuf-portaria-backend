@@ -40,6 +40,12 @@ func (h *SyncHandler) Run(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SyncHandler) ImportAccessLogs(w http.ResponseWriter, r *http.Request) {
+	importedResidentsCount, err := h.service.ImportResidents(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "erro ao importar moradores da planilha", "INTERNAL_ERROR")
+		return
+	}
+
 	importedCount, err := h.service.ImportAccessLogs(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "erro ao importar historico da planilha", "INTERNAL_ERROR")
@@ -53,7 +59,8 @@ func (h *SyncHandler) ImportAccessLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"imported_count": importedCount,
-		"status":         status,
+		"imported_count":           importedCount,
+		"imported_residents_count": importedResidentsCount,
+		"status":                   status,
 	})
 }

@@ -47,7 +47,7 @@ func main() {
 		logger.Error("failed to create google sheets client", "error", err)
 		os.Exit(1)
 	}
-	syncService := syncworker.NewService(accessLogRepo, diaristaRepo, keyRepo, scheduledServiceRepo, shoppingRepo, sheetsClient, logger)
+	syncService := syncworker.NewService(accessLogRepo, diaristaRepo, keyRepo, residentRepo, scheduledServiceRepo, shoppingRepo, sheetsClient, logger)
 	accessLogService := usecase.NewAccessLogService(accessLogRepo, syncService)
 	residentService := usecase.NewResidentService(residentRepo)
 	keyService := usecase.NewKeyService(keyRepo)
@@ -77,6 +77,13 @@ func main() {
 	go func() {
 		importCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
+
+		if err := syncService.RunOnce(importCtx); err != nil {
+			logger.Warn("initial sync failed", "error", err)
+		} else {
+			logger.Info("initial sync finished")
+		}
+
 		importedCount, err := syncService.ImportAccessLogs(importCtx)
 		if err != nil {
 			logger.Warn("initial access log import failed", "error", err)

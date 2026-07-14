@@ -47,6 +47,6 @@ func (s *ResidentService) Upsert(ctx context.Context, input UpsertResidentInput)
 		TenantPhoto:   strings.TrimSpace(input.TenantPhoto),
 		FamilyMembers: strings.TrimSpace(input.FamilyMembers),
 		Photo:         strings.TrimSpace(input.Photo),
-		SyncStatus:    domain.SyncStatusSynced,
+		SyncStatus:    domain.SyncStatusPending,
 	})
 }

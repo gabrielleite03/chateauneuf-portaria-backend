@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -42,6 +43,7 @@ type SheetsClient struct {
 const (
 	diaristaSheetName         = "Diaristas"
 	keySheetName              = "Controle de Chaves"
+	residentSheetName         = "Moradores"
 	scheduledServiceSheetName = "Servicos Agendados"
 	shoppingSheetName         = "Compras"
 )
@@ -132,6 +134,18 @@ var shoppingHeaders = []interface{}{
 	"Status",
 	"Foto",
 	"Criado Em",
+	"Atualizado Em",
+	"Sincronizado Em",
+}
+
+var residentHeaders = []interface{}{
+	"Unidade",
+	"Proprietario",
+	"Telefones",
+	"Inquilino",
+	"Foto Inquilino",
+	"Familiares",
+	"Foto Morador",
 	"Atualizado Em",
 	"Sincronizado Em",
 }
@@ -259,6 +273,86 @@ func (c *SheetsClient) ReadAccessLogs(ctx context.Context) ([]domain.AccessLog, 
 	}
 
 	return accessLogs, nil
+}
+
+func (c *SheetsClient) AppendResident(ctx context.Context, resident domain.Resident) error {
+	if c.spreadsheetID == "" {
+		return ErrSpreadsheetNotConfigured
+	}
+	if c.service == nil {
+		return ErrCredentialsNotConfigured
+	}
+	if err := c.ensureResidentHeaders(ctx); err != nil {
+		return err
+	}
+
+	ownerPhotoCell, err := c.photoCell(ctx, "moradores", resident.Unit+"-morador", resident.Owner, resident.LastUpdated, resident.Photo)
+	if err != nil {
+		return err
+	}
+	tenantPhotoCell, err := c.photoCell(ctx, "moradores", resident.Unit+"-inquilino", resident.Tenant, resident.LastUpdated, resident.TenantPhoto)
+	if err != nil {
+		return err
+	}
+	familyMembersCell, err := c.residentFamilyMembersCell(ctx, resident)
+	if err != nil {
+		return err
+	}
+
+	row := residentRow(resident, time.Now(), ownerPhotoCell, tenantPhotoCell, familyMembersCell)
+	rowIndex, err := c.findRowByLocalID(ctx, residentSheetName, resident.Unit)
+	if err != nil {
+		return err
+	}
+	if rowIndex > 0 {
+		updateRange := fmt.Sprintf("%s!A%d:I%d", quoteSheetName(residentSheetName), rowIndex, rowIndex)
+		_, err := c.service.Spreadsheets.Values.Update(c.spreadsheetID, updateRange, &sheets.ValueRange{
+			Values: [][]interface{}{row},
+		}).ValueInputOption("USER_ENTERED").Context(ctx).Do()
+		if err != nil {
+			return fmt.Errorf("update resident in sheets: %w", err)
+		}
+		return nil
+	}
+
+	appendRange := fmt.Sprintf("%s!A:I", quoteSheetName(residentSheetName))
+	_, err = c.service.Spreadsheets.Values.Append(c.spreadsheetID, appendRange, &sheets.ValueRange{
+		Values: [][]interface{}{row},
+	}).ValueInputOption("USER_ENTERED").InsertDataOption("INSERT_ROWS").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("append resident to sheets: %w", err)
+	}
+
+	return nil
+}
+
+func (c *SheetsClient) ReadResidents(ctx context.Context) ([]domain.Resident, error) {
+	if c.spreadsheetID == "" {
+		return nil, ErrSpreadsheetNotConfigured
+	}
+	if c.service == nil {
+		return nil, ErrCredentialsNotConfigured
+	}
+	if err := c.ensureResidentHeaders(ctx); err != nil {
+		return nil, err
+	}
+
+	readRange := fmt.Sprintf("%s!A2:I", quoteSheetName(residentSheetName))
+	response, err := c.service.Spreadsheets.Values.Get(c.spreadsheetID, readRange).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("read residents from sheets: %w", err)
+	}
+
+	residents := make([]domain.Resident, 0, len(response.Values))
+	for _, row := range response.Values {
+		resident, ok := residentFromSheetRow(row)
+		if !ok {
+			continue
+		}
+		residents = append(residents, resident)
+	}
+
+	return residents, nil
 }
 
 func (c *SheetsClient) AppendDiaristaEntry(ctx context.Context, entry domain.DiaristaEntry) error {
@@ -437,6 +531,10 @@ func (c *SheetsClient) ensureKeyHeaders(ctx context.Context) error {
 	return c.ensureSheetHeaders(ctx, keySheetName, keyHeaders, "A1:L1")
 }
 
+func (c *SheetsClient) ensureResidentHeaders(ctx context.Context) error {
+	return c.ensureSheetHeaders(ctx, residentSheetName, residentHeaders, "A1:I1")
+}
+
 func (c *SheetsClient) ensureScheduledServiceHeaders(ctx context.Context) error {
 	return c.ensureSheetHeaders(ctx, scheduledServiceSheetName, scheduledServiceHeaders, "A1:N1")
 }
@@ -604,6 +702,86 @@ func accessLogFromSheetRow(row []interface{}) (domain.AccessLog, bool) {
 		UpdatedAt:    updatedAt,
 		SyncedAt:     &syncedAtValue,
 	}, true
+}
+
+func residentRow(resident domain.Resident, syncedAt time.Time, ownerPhotoCell string, tenantPhotoCell string, familyMembersCell string) []interface{} {
+	updatedAt := resident.LastUpdated
+	if updatedAt.IsZero() {
+		updatedAt = time.Now()
+	}
+	return []interface{}{
+		resident.Unit,
+		resident.Owner,
+		resident.Phones,
+		resident.Tenant,
+		tenantPhotoCell,
+		familyMembersCell,
+		ownerPhotoCell,
+		formatDateTime(updatedAt),
+		formatDateTime(syncedAt),
+	}
+}
+
+func residentFromSheetRow(row []interface{}) (domain.Resident, bool) {
+	unit := cell(row, 0)
+	if unit == "" {
+		return domain.Resident{}, false
+	}
+
+	updatedAt := parseSheetDateTimeOrDefault(cell(row, 7), "", time.Now())
+	return domain.Resident{
+		Unit:          unit,
+		Owner:         cell(row, 1),
+		Phones:        cell(row, 2),
+		Tenant:        cell(row, 3),
+		TenantPhoto:   normalizeSheetPhoto(cell(row, 4)),
+		FamilyMembers: strings.TrimSpace(cell(row, 5)),
+		Photo:         normalizeSheetPhoto(cell(row, 6)),
+		SyncStatus:    domain.SyncStatusSynced,
+		LastUpdated:   updatedAt,
+	}, true
+}
+
+type sheetFamilyMember struct {
+	Name  string `json:"name"`
+	Photo string `json:"photo"`
+}
+
+func (c *SheetsClient) residentFamilyMembersCell(ctx context.Context, resident domain.Resident) (string, error) {
+	value := strings.TrimSpace(resident.FamilyMembers)
+	if value == "" {
+		return "", nil
+	}
+
+	var members []sheetFamilyMember
+	if err := json.Unmarshal([]byte(value), &members); err != nil {
+		return value, nil
+	}
+
+	changed := false
+	for index := range members {
+		photo := strings.TrimSpace(members[index].Photo)
+		if photo == "" {
+			continue
+		}
+		photoCell, err := c.photoCell(ctx, "moradores", fmt.Sprintf("%s-familiar-%d", resident.Unit, index+1), members[index].Name, resident.LastUpdated, photo)
+		if err != nil {
+			return "", err
+		}
+		if photoCell != photo {
+			members[index].Photo = photoCell
+			changed = true
+		}
+	}
+	if !changed {
+		return value, nil
+	}
+
+	encoded, err := json.Marshal(members)
+	if err != nil {
+		return "", fmt.Errorf("encode resident family members: %w", err)
+	}
+	return string(encoded), nil
 }
 
 func diaristaRow(entry domain.DiaristaEntry, syncedAt time.Time, photoCell string) []interface{} {
