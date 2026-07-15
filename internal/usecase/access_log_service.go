@@ -133,11 +133,14 @@ func (s *AccessLogService) Checkout(ctx context.Context, id int64) (*domain.Acce
 		return nil, err
 	}
 
-	go func() {
-		runCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		_ = s.sync.RunOnce(runCtx)
-	}()
+	runCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := s.sync.RunOnce(runCtx); err != nil {
+		return accessLog, nil
+	}
+	if syncedAccessLog, err := s.repository.FindByID(ctx, id); err == nil {
+		accessLog = syncedAccessLog
+	}
 
 	return accessLog, nil
 }

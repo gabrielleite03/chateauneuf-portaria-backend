@@ -221,17 +221,22 @@ func (c *SheetsClient) AppendAccessLog(ctx context.Context, accessLog domain.Acc
 		return err
 	}
 	row := accessLogRow(accessLog, time.Now(), photoCell)
-	rowIndex, err := c.findAccessLogRow(ctx, accessLog)
+	rowIndexes, err := c.findAccessLogRows(ctx, accessLog)
 	if err != nil {
 		return err
 	}
-	if rowIndex > 0 {
-		updateRange := fmt.Sprintf("%s!A%d:T%d", quoteSheetName(c.sheetName), rowIndex, rowIndex)
-		_, err := c.service.Spreadsheets.Values.Update(c.spreadsheetID, updateRange, &sheets.ValueRange{
-			Values: [][]interface{}{row},
-		}).ValueInputOption("USER_ENTERED").Context(ctx).Do()
-		if err != nil {
-			return fmt.Errorf("update access log in sheets: %w", err)
+	if len(rowIndexes) > 0 {
+		for _, rowIndex := range rowIndexes {
+			if rowIndex <= 0 {
+				continue
+			}
+			updateRange := fmt.Sprintf("%s!A%d:T%d", quoteSheetName(c.sheetName), rowIndex, rowIndex)
+			_, err := c.service.Spreadsheets.Values.Update(c.spreadsheetID, updateRange, &sheets.ValueRange{
+				Values: [][]interface{}{row},
+			}).ValueInputOption("USER_ENTERED").Context(ctx).Do()
+			if err != nil {
+				return fmt.Errorf("update access log in sheets: %w", err)
+			}
 		}
 		return nil
 	}
@@ -609,37 +614,46 @@ func (c *SheetsClient) findRowByLocalID(ctx context.Context, sheetName string, t
 	return c.findRowByColumnValue(ctx, sheetName, "A", targetID)
 }
 
-func (c *SheetsClient) findAccessLogRow(ctx context.Context, accessLog domain.AccessLog) (int, error) {
+func (c *SheetsClient) findAccessLogRows(ctx context.Context, accessLog domain.AccessLog) ([]int, error) {
 	if strings.TrimSpace(accessLog.ExternalID) != "" {
 		rowIndex, err := c.findRowByColumnValue(ctx, c.sheetName, "T", accessLog.ExternalID)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 		if rowIndex > 0 {
-			return rowIndex, nil
+			return []int{rowIndex}, nil
 		}
 	}
-	return c.findRowByLocalID(ctx, c.sheetName, strconv.FormatInt(accessLog.ID, 10))
+	return c.findRowsByColumnValue(ctx, c.sheetName, "A", strconv.FormatInt(accessLog.ID, 10))
 }
 
 func (c *SheetsClient) findRowByColumnValue(ctx context.Context, sheetName string, column string, targetValue string) (int, error) {
+	rowIndexes, err := c.findRowsByColumnValue(ctx, sheetName, column, targetValue)
+	if err != nil || len(rowIndexes) == 0 {
+		return 0, err
+	}
+	return rowIndexes[0], nil
+}
+
+func (c *SheetsClient) findRowsByColumnValue(ctx context.Context, sheetName string, column string, targetValue string) ([]int, error) {
 	readRange := fmt.Sprintf("%s!%s:%s", quoteSheetName(sheetName), column, column)
 	response, err := c.service.Spreadsheets.Values.Get(c.spreadsheetID, readRange).Context(ctx).Do()
 	if err != nil {
-		return 0, fmt.Errorf("read sheets column %s: %w", column, err)
+		return nil, fmt.Errorf("read sheets column %s: %w", column, err)
 	}
 
 	targetValue = strings.TrimSpace(targetValue)
+	rowIndexes := make([]int, 0)
 	for index, row := range response.Values {
 		if len(row) == 0 {
 			continue
 		}
 		if strings.TrimSpace(fmt.Sprint(row[0])) == targetValue {
-			return index + 1, nil
+			rowIndexes = append(rowIndexes, index+1)
 		}
 	}
 
-	return 0, nil
+	return rowIndexes, nil
 }
 
 func accessLogRow(accessLog domain.AccessLog, syncedAt time.Time, photoCell string) []interface{} {
