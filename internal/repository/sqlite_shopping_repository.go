@@ -21,7 +21,7 @@ func NewSQLiteShoppingRepository(db *sql.DB) *SQLiteShoppingRepository {
 
 func (r *SQLiteShoppingRepository) List(ctx context.Context) ([]domain.ShoppingDelivery, error) {
 	return r.queryShopping(ctx, `
-		SELECT id, unit, courier_name, document, store, product, notes, photo, received_at, withdrawn_at,
+		SELECT id, unit, recipient, courier_name, document, store, product, notes, photo, received_at, withdrawn_at,
 			status, sync_status, created_at, updated_at
 		FROM shopping_deliveries
 		ORDER BY received_at DESC, id DESC
@@ -32,10 +32,10 @@ func (r *SQLiteShoppingRepository) Create(ctx context.Context, delivery domain.S
 	now := time.Now().Round(0)
 	result, err := r.db.ExecContext(ctx, `
 		INSERT INTO shopping_deliveries (
-			unit, courier_name, document, store, product, notes, photo, received_at, withdrawn_at,
+			unit, recipient, courier_name, document, store, product, notes, photo, received_at, withdrawn_at,
 			status, sync_status, sync_error, created_at, updated_at, synced_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, '', ?, ?, ?)
-	`, delivery.Unit, delivery.CourierName, delivery.Document, delivery.Store, delivery.Product, delivery.Notes,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, '', ?, ?, ?)
+	`, delivery.Unit, delivery.Recipient, delivery.CourierName, delivery.Document, delivery.Store, delivery.Product, delivery.Notes,
 		delivery.Photo, now, delivery.Status, delivery.SyncStatus, now, now, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create shopping delivery: %w", err)
@@ -80,7 +80,7 @@ func (r *SQLiteShoppingRepository) ListPendingSync(ctx context.Context, limit in
 		limit = 50
 	}
 	return r.queryShopping(ctx, `
-		SELECT id, unit, courier_name, document, store, product, notes, photo, received_at, withdrawn_at,
+		SELECT id, unit, recipient, courier_name, document, store, product, notes, photo, received_at, withdrawn_at,
 			status, sync_status, created_at, updated_at
 		FROM shopping_deliveries
 		WHERE sync_status IN (?, ?)
@@ -137,7 +137,7 @@ func (r *SQLiteShoppingRepository) SyncStats(ctx context.Context) (int, error) {
 
 func (r *SQLiteShoppingRepository) FindByID(ctx context.Context, id int64) (*domain.ShoppingDelivery, error) {
 	deliveries, err := r.queryShopping(ctx, `
-		SELECT id, unit, courier_name, document, store, product, notes, photo, received_at, withdrawn_at,
+		SELECT id, unit, recipient, courier_name, document, store, product, notes, photo, received_at, withdrawn_at,
 			status, sync_status, created_at, updated_at
 		FROM shopping_deliveries
 		WHERE id = ?
@@ -166,6 +166,7 @@ func (r *SQLiteShoppingRepository) queryShopping(ctx context.Context, query stri
 		if err := rows.Scan(
 			&id,
 			&delivery.Unit,
+			&delivery.Recipient,
 			&delivery.CourierName,
 			&delivery.Document,
 			&delivery.Store,

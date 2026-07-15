@@ -12,6 +12,7 @@ const (
 type ShoppingDelivery struct {
 	ID          string         `json:"id"`
 	Unit        string         `json:"unit"`
+	Recipient   string         `json:"recipient"`
 	CourierName string         `json:"courierName"`
 	Document    string         `json:"document"`
 	Store       string         `json:"store"`

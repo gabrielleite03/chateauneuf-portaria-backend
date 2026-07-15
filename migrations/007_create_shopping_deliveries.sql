@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS shopping_deliveries (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	unit TEXT NOT NULL,
+	recipient TEXT NOT NULL DEFAULT '',
 	courier_name TEXT NOT NULL,
 	document TEXT NOT NULL,
 	store TEXT NOT NULL,

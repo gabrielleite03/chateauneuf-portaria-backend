@@ -19,6 +19,7 @@ type ShoppingService struct {
 
 type CreateShoppingInput struct {
 	Unit        string `json:"unit"`
+	Recipient   string `json:"recipient"`
 	CourierName string `json:"courierName"`
 	Document    string `json:"document"`
 	Store       string `json:"store"`
@@ -43,9 +44,13 @@ func (s *ShoppingService) Create(ctx context.Context, input CreateShoppingInput)
 	if strings.TrimSpace(input.Unit) == "" {
 		return nil, domain.ErrInvalidInput
 	}
+	if strings.TrimSpace(input.Recipient) == "" {
+		return nil, domain.ErrInvalidInput
+	}
 
 	return s.repository.Create(ctx, domain.ShoppingDelivery{
 		Unit:        strings.TrimSpace(input.Unit),
+		Recipient:   strings.TrimSpace(input.Recipient),
 		CourierName: strings.TrimSpace(input.CourierName),
 		Document:    strings.TrimSpace(input.Document),
 		Store:       strings.TrimSpace(input.Store),

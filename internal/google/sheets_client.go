@@ -123,6 +123,7 @@ var keyHeaders = []interface{}{
 var shoppingHeaders = []interface{}{
 	"ID Local",
 	"Apartamento",
+	"Destinatario",
 	"Entregador",
 	"Documento",
 	"Loja/Transportadora",
@@ -504,7 +505,7 @@ func (c *SheetsClient) AppendShoppingDelivery(ctx context.Context, delivery doma
 		return err
 	}
 	if rowIndex > 0 {
-		updateRange := fmt.Sprintf("%s!A%d:P%d", quoteSheetName(shoppingSheetName), rowIndex, rowIndex)
+		updateRange := fmt.Sprintf("%s!A%d:Q%d", quoteSheetName(shoppingSheetName), rowIndex, rowIndex)
 		_, err := c.service.Spreadsheets.Values.Update(c.spreadsheetID, updateRange, &sheets.ValueRange{
 			Values: [][]interface{}{row},
 		}).ValueInputOption("USER_ENTERED").Context(ctx).Do()
@@ -514,7 +515,7 @@ func (c *SheetsClient) AppendShoppingDelivery(ctx context.Context, delivery doma
 		return nil
 	}
 
-	appendRange := fmt.Sprintf("%s!A:P", quoteSheetName(shoppingSheetName))
+	appendRange := fmt.Sprintf("%s!A:Q", quoteSheetName(shoppingSheetName))
 	_, err = c.service.Spreadsheets.Values.Append(c.spreadsheetID, appendRange, &sheets.ValueRange{
 		Values: [][]interface{}{row},
 	}).ValueInputOption("USER_ENTERED").InsertDataOption("INSERT_ROWS").Context(ctx).Do()
@@ -546,7 +547,7 @@ func (c *SheetsClient) ensureScheduledServiceHeaders(ctx context.Context) error 
 }
 
 func (c *SheetsClient) ensureShoppingHeaders(ctx context.Context) error {
-	return c.ensureSheetHeaders(ctx, shoppingSheetName, shoppingHeaders, "A1:P1")
+	return c.ensureSheetHeaders(ctx, shoppingSheetName, shoppingHeaders, "A1:Q1")
 }
 
 func (c *SheetsClient) ensureSheetHeaders(ctx context.Context, sheetName string, headers []interface{}, headerCells string) error {
@@ -877,6 +878,7 @@ func shoppingRow(delivery domain.ShoppingDelivery, syncedAt time.Time, photoCell
 	return []interface{}{
 		delivery.ID,
 		delivery.Unit,
+		delivery.Recipient,
 		delivery.CourierName,
 		delivery.Document,
 		delivery.Store,
