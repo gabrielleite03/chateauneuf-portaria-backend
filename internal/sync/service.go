@@ -13,6 +13,8 @@ type SpreadsheetClient interface {
 	Ping(ctx context.Context) error
 	ReadAccessLogs(ctx context.Context) ([]domain.AccessLog, error)
 	ReadResidents(ctx context.Context) ([]domain.Resident, error)
+	ReadDiaristaEntries(ctx context.Context) ([]domain.DiaristaEntry, error)
+	ReadScheduledServices(ctx context.Context) ([]domain.ScheduledService, error)
 	AppendAccessLog(ctx context.Context, accessLog domain.AccessLog) error
 	AppendResident(ctx context.Context, resident domain.Resident) error
 	AppendDiaristaEntry(ctx context.Context, entry domain.DiaristaEntry) error
@@ -33,6 +35,7 @@ type Service struct {
 }
 
 type DiaristaRepository interface {
+	UpsertImported(ctx context.Context, entry domain.DiaristaEntry) (*domain.DiaristaEntry, error)
 	ListPendingSync(ctx context.Context, limit int) ([]domain.DiaristaEntry, error)
 	MarkSynced(ctx context.Context, id string, syncedAt time.Time) error
 	MarkSyncError(ctx context.Context, id string, syncError string) error
@@ -55,6 +58,7 @@ type ResidentRepository interface {
 }
 
 type ScheduledServiceRepository interface {
+	UpsertImported(ctx context.Context, service domain.ScheduledService) (*domain.ScheduledService, error)
 	ListPendingSync(ctx context.Context, limit int) ([]domain.ScheduledService, error)
 	MarkSynced(ctx context.Context, id string, syncedAt time.Time) error
 	MarkSyncError(ctx context.Context, id string, syncError string) error
@@ -137,9 +141,6 @@ func (s *Service) RunOnce(ctx context.Context) error {
 			if err := s.residentRepository.MarkSynced(ctx, resident.Unit, time.Now()); err != nil {
 				return err
 			}
-		}
-		if _, err := s.ImportResidents(ctx); err != nil {
-			s.logger.Warn("resident import failed", "error", err)
 		}
 	}
 
@@ -262,6 +263,58 @@ func (s *Service) ImportResidents(ctx context.Context) (int, error) {
 		importedCount++
 	}
 
+	return importedCount, nil
+}
+
+func (s *Service) ImportDiaristas(ctx context.Context) (int, error) {
+	if s.diaristaRepository == nil {
+		return 0, nil
+	}
+	if err := s.client.Ping(ctx); err != nil {
+		return 0, err
+	}
+
+	entries, err := s.client.ReadDiaristaEntries(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	importedCount := 0
+	for index := range entries {
+		if entries[index].ID == "" {
+			continue
+		}
+		if _, err := s.diaristaRepository.UpsertImported(ctx, entries[index]); err != nil {
+			return importedCount, err
+		}
+		importedCount++
+	}
+	return importedCount, nil
+}
+
+func (s *Service) ImportScheduledServices(ctx context.Context) (int, error) {
+	if s.scheduledServiceRepository == nil {
+		return 0, nil
+	}
+	if err := s.client.Ping(ctx); err != nil {
+		return 0, err
+	}
+
+	services, err := s.client.ReadScheduledServices(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	importedCount := 0
+	for index := range services {
+		if services[index].ID == "" {
+			continue
+		}
+		if _, err := s.scheduledServiceRepository.UpsertImported(ctx, services[index]); err != nil {
+			return importedCount, err
+		}
+		importedCount++
+	}
 	return importedCount, nil
 }
 

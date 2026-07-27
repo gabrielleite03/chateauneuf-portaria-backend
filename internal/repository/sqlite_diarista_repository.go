@@ -47,6 +47,50 @@ func (r *SQLiteDiaristaRepository) Create(ctx context.Context, entry domain.Diar
 	return r.FindByID(ctx, id)
 }
 
+func (r *SQLiteDiaristaRepository) UpsertImported(ctx context.Context, entry domain.DiaristaEntry) (*domain.DiaristaEntry, error) {
+	numericID, err := parseDiaristaID(entry.ID)
+	if err != nil {
+		return nil, domain.ErrInvalidInput
+	}
+	if entry.CreatedAt.IsZero() {
+		entry.CreatedAt = time.Now()
+	}
+	if entry.UpdatedAt.IsZero() {
+		entry.UpdatedAt = entry.CreatedAt
+	}
+
+	_, err = r.db.ExecContext(ctx, `
+		INSERT INTO diarista_entries (
+			id, date, name, rg, unit, authorized_by, entry_time, exit_time, gatekeeper, photo,
+			sync_status, sync_error, created_at, updated_at, synced_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			date = excluded.date,
+			name = excluded.name,
+			rg = excluded.rg,
+			unit = excluded.unit,
+			authorized_by = excluded.authorized_by,
+			entry_time = excluded.entry_time,
+			exit_time = excluded.exit_time,
+			gatekeeper = excluded.gatekeeper,
+			photo = excluded.photo,
+			sync_status = excluded.sync_status,
+			sync_error = '',
+			created_at = excluded.created_at,
+			updated_at = excluded.updated_at,
+			synced_at = excluded.synced_at
+		WHERE diarista_entries.sync_status = ?
+			AND excluded.updated_at >= diarista_entries.updated_at
+	`, numericID, entry.Date, entry.Name, entry.RG, entry.Unit, entry.AuthorizedBy, entry.EntryTime,
+		entry.ExitTime, entry.Gatekeeper, entry.Photo, domain.SyncStatusSynced, entry.CreatedAt,
+		entry.UpdatedAt, time.Now(), domain.SyncStatusSynced)
+	if err != nil {
+		return nil, fmt.Errorf("upsert imported diarista entry: %w", err)
+	}
+
+	return r.FindByID(ctx, numericID)
+}
+
 func (r *SQLiteDiaristaRepository) Checkout(ctx context.Context, id string, exitTime string) (*domain.DiaristaEntry, error) {
 	numericID, err := parseDiaristaID(id)
 	if err != nil {

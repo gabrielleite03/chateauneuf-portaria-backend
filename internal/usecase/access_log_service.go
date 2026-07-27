@@ -29,6 +29,8 @@ type SyncService interface {
 	RunOnce(ctx context.Context) error
 	ImportAccessLogs(ctx context.Context) (int, error)
 	ImportResidents(ctx context.Context) (int, error)
+	ImportDiaristas(ctx context.Context) (int, error)
+	ImportScheduledServices(ctx context.Context) (int, error)
 	Status(ctx context.Context) (SyncStatus, error)
 }
 

@@ -150,6 +150,9 @@ var residentHeaders = []interface{}{
 	"Foto Morador",
 	"Atualizado Em",
 	"Sincronizado Em",
+	"E-mail Morador",
+	"E-mail Inquilino",
+	"Telefone Inquilino",
 }
 
 func NewSheetsClient(ctx context.Context, spreadsheetID, sheetName, credentialsFile string, driveFolderID string) (*SheetsClient, error) {
@@ -312,7 +315,7 @@ func (c *SheetsClient) AppendResident(ctx context.Context, resident domain.Resid
 		return err
 	}
 	if rowIndex > 0 {
-		updateRange := fmt.Sprintf("%s!A%d:I%d", quoteSheetName(residentSheetName), rowIndex, rowIndex)
+		updateRange := fmt.Sprintf("%s!A%d:L%d", quoteSheetName(residentSheetName), rowIndex, rowIndex)
 		_, err := c.service.Spreadsheets.Values.Update(c.spreadsheetID, updateRange, &sheets.ValueRange{
 			Values: [][]interface{}{row},
 		}).ValueInputOption("USER_ENTERED").Context(ctx).Do()
@@ -322,7 +325,7 @@ func (c *SheetsClient) AppendResident(ctx context.Context, resident domain.Resid
 		return nil
 	}
 
-	appendRange := fmt.Sprintf("%s!A:I", quoteSheetName(residentSheetName))
+	appendRange := fmt.Sprintf("%s!A:L", quoteSheetName(residentSheetName))
 	_, err = c.service.Spreadsheets.Values.Append(c.spreadsheetID, appendRange, &sheets.ValueRange{
 		Values: [][]interface{}{row},
 	}).ValueInputOption("USER_ENTERED").InsertDataOption("INSERT_ROWS").Context(ctx).Do()
@@ -344,7 +347,7 @@ func (c *SheetsClient) ReadResidents(ctx context.Context) ([]domain.Resident, er
 		return nil, err
 	}
 
-	readRange := fmt.Sprintf("%s!A2:I", quoteSheetName(residentSheetName))
+	readRange := fmt.Sprintf("%s!A2:L", quoteSheetName(residentSheetName))
 	response, err := c.service.Spreadsheets.Values.Get(c.spreadsheetID, readRange).Context(ctx).Do()
 	if err != nil {
 		return nil, fmt.Errorf("read residents from sheets: %w", err)
@@ -402,6 +405,34 @@ func (c *SheetsClient) AppendDiaristaEntry(ctx context.Context, entry domain.Dia
 	}
 
 	return nil
+}
+
+func (c *SheetsClient) ReadDiaristaEntries(ctx context.Context) ([]domain.DiaristaEntry, error) {
+	if c.spreadsheetID == "" {
+		return nil, ErrSpreadsheetNotConfigured
+	}
+	if c.service == nil {
+		return nil, ErrCredentialsNotConfigured
+	}
+	if err := c.ensureDiaristaHeaders(ctx); err != nil {
+		return nil, err
+	}
+
+	readRange := fmt.Sprintf("%s!A2:N", quoteSheetName(diaristaSheetName))
+	response, err := c.service.Spreadsheets.Values.Get(c.spreadsheetID, readRange).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("read diarista entries from sheets: %w", err)
+	}
+
+	entries := make([]domain.DiaristaEntry, 0, len(response.Values))
+	for _, row := range response.Values {
+		entry, ok := diaristaFromSheetRow(row)
+		if !ok {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
 }
 
 func (c *SheetsClient) AppendKeyRecord(ctx context.Context, key domain.KeyRecord) error {
@@ -484,6 +515,34 @@ func (c *SheetsClient) AppendScheduledService(ctx context.Context, service domai
 	return nil
 }
 
+func (c *SheetsClient) ReadScheduledServices(ctx context.Context) ([]domain.ScheduledService, error) {
+	if c.spreadsheetID == "" {
+		return nil, ErrSpreadsheetNotConfigured
+	}
+	if c.service == nil {
+		return nil, ErrCredentialsNotConfigured
+	}
+	if err := c.ensureScheduledServiceHeaders(ctx); err != nil {
+		return nil, err
+	}
+
+	readRange := fmt.Sprintf("%s!A2:N", quoteSheetName(scheduledServiceSheetName))
+	response, err := c.service.Spreadsheets.Values.Get(c.spreadsheetID, readRange).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("read scheduled services from sheets: %w", err)
+	}
+
+	services := make([]domain.ScheduledService, 0, len(response.Values))
+	for _, row := range response.Values {
+		service, ok := scheduledServiceFromSheetRow(row)
+		if !ok {
+			continue
+		}
+		services = append(services, service)
+	}
+	return services, nil
+}
+
 func (c *SheetsClient) AppendShoppingDelivery(ctx context.Context, delivery domain.ShoppingDelivery) error {
 	if c.spreadsheetID == "" {
 		return ErrSpreadsheetNotConfigured
@@ -539,7 +598,7 @@ func (c *SheetsClient) ensureKeyHeaders(ctx context.Context) error {
 }
 
 func (c *SheetsClient) ensureResidentHeaders(ctx context.Context) error {
-	return c.ensureSheetHeaders(ctx, residentSheetName, residentHeaders, "A1:I1")
+	return c.ensureSheetHeaders(ctx, residentSheetName, residentHeaders, "A1:L1")
 }
 
 func (c *SheetsClient) ensureScheduledServiceHeaders(ctx context.Context) error {
@@ -745,7 +804,7 @@ func residentRow(resident domain.Resident, syncedAt time.Time, ownerPhotoCell st
 		updatedAt = time.Now()
 	}
 	return []interface{}{
-		resident.Unit,
+		sheetTextValue(resident.Unit),
 		resident.Owner,
 		resident.Phones,
 		resident.Tenant,
@@ -754,6 +813,9 @@ func residentRow(resident domain.Resident, syncedAt time.Time, ownerPhotoCell st
 		ownerPhotoCell,
 		formatDateTime(updatedAt),
 		formatDateTime(syncedAt),
+		resident.Email,
+		resident.TenantEmail,
+		resident.TenantPhone,
 	}
 }
 
@@ -772,9 +834,27 @@ func residentFromSheetRow(row []interface{}) (domain.Resident, bool) {
 		TenantPhoto:   normalizeSheetPhoto(cell(row, 4)),
 		FamilyMembers: strings.TrimSpace(cell(row, 5)),
 		Photo:         normalizeSheetPhoto(cell(row, 6)),
+		Email:         cell(row, 9),
+		TenantEmail:   cell(row, 10),
+		TenantPhone:   cell(row, 11),
 		SyncStatus:    domain.SyncStatusSynced,
 		LastUpdated:   updatedAt,
 	}, true
+}
+
+// USER_ENTERED is required for photo formulas, so numeric-looking identifiers
+// with a leading zero are prefixed as text to keep units such as "03" intact.
+func sheetTextValue(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if len(trimmed) < 2 || trimmed[0] != '0' {
+		return trimmed
+	}
+	for _, char := range trimmed {
+		if char < '0' || char > '9' {
+			return trimmed
+		}
+	}
+	return "'" + trimmed
 }
 
 type sheetFamilyMember struct {
@@ -838,6 +918,46 @@ func diaristaRow(entry domain.DiaristaEntry, syncedAt time.Time, photoCell strin
 	}
 }
 
+func diaristaFromSheetRow(row []interface{}) (domain.DiaristaEntry, bool) {
+	id := strings.TrimPrefix(cell(row, 0), "d-")
+	if _, err := strconv.ParseInt(id, 10, 64); err != nil {
+		return domain.DiaristaEntry{}, false
+	}
+
+	entryDate, err := parseSheetDateTime(cell(row, 1), "")
+	if err != nil || strings.TrimSpace(cell(row, 2)) == "" {
+		return domain.DiaristaEntry{}, false
+	}
+
+	createdAt := parseSheetDateTimeOrDefault(cell(row, 11), "", entryDate)
+	updatedAt := parseSheetDateTimeOrDefault(cell(row, 12), "", createdAt)
+	return domain.DiaristaEntry{
+		ID:           id,
+		Date:         entryDate.Format("2006-01-02"),
+		Name:         cell(row, 2),
+		RG:           cell(row, 3),
+		Unit:         cell(row, 4),
+		AuthorizedBy: cell(row, 5),
+		EntryTime:    normalizeSheetClock(cell(row, 6)),
+		ExitTime:     normalizeSheetClock(cell(row, 7)),
+		Gatekeeper:   cell(row, 8),
+		Photo:        normalizeSheetPhoto(cell(row, 9)),
+		SyncStatus:   domain.SyncStatusSynced,
+		CreatedAt:    createdAt,
+		UpdatedAt:    updatedAt,
+	}, true
+}
+
+func normalizeSheetClock(value string) string {
+	value = strings.TrimSpace(value)
+	for _, layout := range []string{"15:04:05", "15:04"} {
+		if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+			return parsed.Format("15:04")
+		}
+	}
+	return value
+}
+
 func keyRow(key domain.KeyRecord, syncedAt time.Time) []interface{} {
 	return []interface{}{
 		key.ID,
@@ -872,6 +992,46 @@ func scheduledServiceRow(service domain.ScheduledService, syncedAt time.Time, ph
 		formatDateTime(service.UpdatedAt),
 		formatDateTime(syncedAt),
 	}
+}
+
+func scheduledServiceFromSheetRow(row []interface{}) (domain.ScheduledService, bool) {
+	id := strings.TrimPrefix(cell(row, 0), "s-")
+	if _, err := strconv.ParseInt(id, 10, 64); err != nil {
+		return domain.ScheduledService{}, false
+	}
+
+	serviceDate, err := parseSheetDateTime(cell(row, 1), "")
+	if err != nil || strings.TrimSpace(cell(row, 2)) == "" {
+		return domain.ScheduledService{}, false
+	}
+
+	status := domain.ScheduledServiceStatus(strings.ToLower(cell(row, 9)))
+	if !status.IsValid() {
+		if cell(row, 7) != "" {
+			status = domain.ScheduledServiceStatusDone
+		} else {
+			status = domain.ScheduledServiceStatusScheduled
+		}
+	}
+
+	createdAt := parseSheetDateTimeOrDefault(cell(row, 11), "", serviceDate)
+	updatedAt := parseSheetDateTimeOrDefault(cell(row, 12), "", createdAt)
+	return domain.ScheduledService{
+		ID:           id,
+		Date:         serviceDate.Format("2006-01-02"),
+		Name:         cell(row, 2),
+		Document:     cell(row, 3),
+		Company:      cell(row, 4),
+		Unit:         cell(row, 5),
+		AuthorizedBy: cell(row, 6),
+		ArrivalTime:  normalizeSheetClock(cell(row, 7)),
+		Notes:        cell(row, 8),
+		Status:       status,
+		Photo:        normalizeSheetPhoto(cell(row, 10)),
+		SyncStatus:   domain.SyncStatusSynced,
+		CreatedAt:    createdAt,
+		UpdatedAt:    updatedAt,
+	}, true
 }
 
 func shoppingRow(delivery domain.ShoppingDelivery, syncedAt time.Time, photoCell string) []interface{} {

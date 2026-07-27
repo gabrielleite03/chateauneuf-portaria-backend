@@ -47,6 +47,51 @@ func (r *SQLiteScheduledServiceRepository) Create(ctx context.Context, service d
 	return r.FindByID(ctx, id)
 }
 
+func (r *SQLiteScheduledServiceRepository) UpsertImported(ctx context.Context, service domain.ScheduledService) (*domain.ScheduledService, error) {
+	numericID, err := parseScheduledServiceID(service.ID)
+	if err != nil {
+		return nil, domain.ErrInvalidInput
+	}
+	if service.CreatedAt.IsZero() {
+		service.CreatedAt = time.Now()
+	}
+	if service.UpdatedAt.IsZero() {
+		service.UpdatedAt = service.CreatedAt
+	}
+
+	_, err = r.db.ExecContext(ctx, `
+		INSERT INTO scheduled_services (
+			id, date, name, document, company, unit, authorized_by, arrival_time, notes, status, photo,
+			sync_status, sync_error, created_at, updated_at, synced_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			date = excluded.date,
+			name = excluded.name,
+			document = excluded.document,
+			company = excluded.company,
+			unit = excluded.unit,
+			authorized_by = excluded.authorized_by,
+			arrival_time = excluded.arrival_time,
+			notes = excluded.notes,
+			status = excluded.status,
+			photo = excluded.photo,
+			sync_status = excluded.sync_status,
+			sync_error = '',
+			created_at = excluded.created_at,
+			updated_at = excluded.updated_at,
+			synced_at = excluded.synced_at
+		WHERE scheduled_services.sync_status = ?
+			AND excluded.updated_at >= scheduled_services.updated_at
+	`, numericID, service.Date, service.Name, service.Document, service.Company, service.Unit,
+		service.AuthorizedBy, service.ArrivalTime, service.Notes, service.Status, service.Photo,
+		domain.SyncStatusSynced, service.CreatedAt, service.UpdatedAt, time.Now(), domain.SyncStatusSynced)
+	if err != nil {
+		return nil, fmt.Errorf("upsert imported scheduled service: %w", err)
+	}
+
+	return r.FindByID(ctx, numericID)
+}
+
 func (r *SQLiteScheduledServiceRepository) UpdateStatus(ctx context.Context, id string, status domain.ScheduledServiceStatus, photo string, arrivalTime string) (*domain.ScheduledService, error) {
 	numericID, err := parseScheduledServiceID(id)
 	if err != nil {

@@ -84,6 +84,20 @@ func main() {
 			logger.Info("initial sync finished")
 		}
 
+		importedDiaristasCount, err := syncService.ImportDiaristas(importCtx)
+		if err != nil {
+			logger.Warn("initial diarista import failed", "error", err)
+		} else {
+			logger.Info("initial diarista import finished", "imported_count", importedDiaristasCount)
+		}
+
+		importedScheduledServicesCount, err := syncService.ImportScheduledServices(importCtx)
+		if err != nil {
+			logger.Warn("initial scheduled service import failed", "error", err)
+		} else {
+			logger.Info("initial scheduled service import finished", "imported_count", importedScheduledServicesCount)
+		}
+
 		importedCount, err := syncService.ImportAccessLogs(importCtx)
 		if err != nil {
 			logger.Warn("initial access log import failed", "error", err)
