@@ -8,4 +8,5 @@ var (
 	ErrReservationDateUnavailable = errors.New("data ja possui uma reserva ativa")
 	ErrCancellationDeadline       = errors.New("cancelamento permitido somente ate 7 dias antes do evento")
 	ErrActiveReservationDeletion  = errors.New("uma reserva ativa deve ser cancelada antes de ser excluida")
+	ErrActiveVisitExists          = errors.New("visitante ja possui uma entrada ativa; registre a saida antes de uma nova entrada")
 )

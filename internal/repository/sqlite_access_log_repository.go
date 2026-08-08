@@ -39,6 +39,9 @@ func (r *SQLiteAccessLogRepository) Create(ctx context.Context, accessLog *domai
 		accessLog.CreatedAt, accessLog.UpdatedAt, accessLog.SyncedAt,
 	)
 	if err != nil {
+		if strings.Contains(err.Error(), "active visit already exists") {
+			return domain.ErrActiveVisitExists
+		}
 		return fmt.Errorf("create access log: %w", err)
 	}
 
@@ -48,6 +51,24 @@ func (r *SQLiteAccessLogRepository) Create(ctx context.Context, accessLog *domai
 	}
 	accessLog.ID = id
 	return nil
+}
+
+func (r *SQLiteAccessLogRepository) HasOpenByDocument(ctx context.Context, document string) (bool, error) {
+	var exists bool
+	err := r.db.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM access_logs
+			WHERE exit_at IS NULL
+				AND visit_status = ?
+				AND lower(replace(replace(replace(replace(replace(trim(document), '.', ''), '-', ''), '/', ''), ' ', ''), char(9), '')) =
+					lower(replace(replace(replace(replace(replace(trim(?), '.', ''), '-', ''), '/', ''), ' ', ''), char(9), ''))
+		)
+	`, domain.VisitStatusInProgress, document).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check active access log by document: %w", err)
+	}
+	return exists, nil
 }
 
 func (r *SQLiteAccessLogRepository) UpsertImported(ctx context.Context, accessLog *domain.AccessLog) error {

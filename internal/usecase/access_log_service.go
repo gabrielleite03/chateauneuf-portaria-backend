@@ -17,6 +17,7 @@ type AccessLogRepository interface {
 	UpsertImported(ctx context.Context, accessLog *domain.AccessLog) error
 	List(ctx context.Context, filters domain.AccessLogFilters) ([]domain.AccessLog, error)
 	ListOpen(ctx context.Context) ([]domain.AccessLog, error)
+	HasOpenByDocument(ctx context.Context, document string) (bool, error)
 	FindByID(ctx context.Context, id int64) (*domain.AccessLog, error)
 	Checkout(ctx context.Context, id int64, exitAt time.Time) (*domain.AccessLog, error)
 	ListPendingSync(ctx context.Context, limit int) ([]domain.AccessLog, error)
@@ -63,6 +64,15 @@ func (s *AccessLogService) Create(ctx context.Context, input CreateAccessLogInpu
 		return nil, domain.ErrInvalidInput
 	}
 
+	document := strings.TrimSpace(input.Document)
+	hasOpenEntry, err := s.repository.HasOpenByDocument(ctx, document)
+	if err != nil {
+		return nil, err
+	}
+	if hasOpenEntry {
+		return nil, domain.ErrActiveVisitExists
+	}
+
 	entryAt := time.Now()
 	if input.EntryAt != "" {
 		parsed, err := time.Parse(time.RFC3339, input.EntryAt)
@@ -75,7 +85,7 @@ func (s *AccessLogService) Create(ctx context.Context, input CreateAccessLogInpu
 	accessLog := &domain.AccessLog{
 		ExternalID:   newAccessLogExternalID(),
 		VisitorName:  strings.TrimSpace(input.VisitorName),
-		Document:     strings.TrimSpace(input.Document),
+		Document:     document,
 		Company:      strings.TrimSpace(input.Company),
 		Phone:        strings.TrimSpace(input.Phone),
 		Unit:         strings.TrimSpace(input.Unit),

@@ -94,6 +94,8 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "dados invalidos", "VALIDATION_ERROR")
 	case errors.Is(err, domain.ErrNotFound):
 		writeError(w, http.StatusNotFound, "registro nao encontrado", "NOT_FOUND")
+	case errors.Is(err, domain.ErrActiveVisitExists):
+		writeError(w, http.StatusConflict, err.Error(), "ACTIVE_VISIT_EXISTS")
 	case errors.Is(err, domain.ErrReservationDateUnavailable):
 		writeError(w, http.StatusConflict, err.Error(), "RESERVATION_DATE_UNAVAILABLE")
 	case errors.Is(err, domain.ErrCancellationDeadline), errors.Is(err, domain.ErrActiveReservationDeletion):
