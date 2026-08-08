@@ -39,6 +39,9 @@ func (r *SQLiteReservationRepository) Create(ctx context.Context, reservation do
 		reservation.StartTime, reservation.EndTime, reservation.Guests, reservation.Notes,
 		reservation.Status, reservation.SyncStatus, now, now, nil)
 	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return nil, domain.ErrReservationDateUnavailable
+		}
 		return nil, fmt.Errorf("create common area reservation: %w", err)
 	}
 
@@ -47,6 +50,20 @@ func (r *SQLiteReservationRepository) Create(ctx context.Context, reservation do
 		return nil, fmt.Errorf("read common area reservation id: %w", err)
 	}
 	return r.FindByID(ctx, id)
+}
+
+func (r *SQLiteReservationRepository) HasActiveConflict(ctx context.Context, reservationDate, area, unit string) (bool, error) {
+	var exists bool
+	err := r.db.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM common_area_reservations
+			WHERE reservation_date = ? AND status = ? AND (area = ? OR unit = ?)
+		)
+	`, reservationDate, domain.ReservationStatusBooked, area, unit).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check active reservation conflict: %w", err)
+	}
+	return exists, nil
 }
 
 func (r *SQLiteReservationRepository) UpdateStatus(ctx context.Context, id string, status domain.ReservationStatus) (*domain.CommonAreaReservation, error) {
@@ -110,6 +127,14 @@ func (r *SQLiteReservationRepository) FindByID(ctx context.Context, id int64) (*
 		return nil, domain.ErrNotFound
 	}
 	return &reservations[0], nil
+}
+
+func (r *SQLiteReservationRepository) GetByID(ctx context.Context, id string) (*domain.CommonAreaReservation, error) {
+	numericID, err := parseReservationID(id)
+	if err != nil {
+		return nil, domain.ErrInvalidInput
+	}
+	return r.FindByID(ctx, numericID)
 }
 
 func (r *SQLiteReservationRepository) queryReservations(ctx context.Context, query string, args ...any) ([]domain.CommonAreaReservation, error) {
