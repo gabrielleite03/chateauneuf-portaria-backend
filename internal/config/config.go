@@ -19,6 +19,12 @@ type Config struct {
 	GoogleDriveFolderID   string
 	PhotoStorageDir       string
 	SyncInterval          time.Duration
+	SMTPHost              string
+	SMTPPort              int
+	SMTPUsername          string
+	SMTPPassword          string
+	SMTPFrom              string
+	InternalAPIToken      string
 }
 
 func Load() Config {
@@ -35,6 +41,12 @@ func Load() Config {
 		GoogleDriveFolderID:   env("GOOGLE_DRIVE_FOLDER_ID", ""),
 		PhotoStorageDir:       env("PHOTO_STORAGE_DIR", "data/photos"),
 		SyncInterval:          time.Duration(envInt("SYNC_INTERVAL_SECONDS", 30)) * time.Second,
+		SMTPHost:              env("SMTP_HOST", "smtp.gmail.com"),
+		SMTPPort:              envInt("SMTP_PORT", 587),
+		SMTPUsername:          env("SMTP_USERNAME", ""),
+		SMTPPassword:          env("SMTP_PASSWORD", ""),
+		SMTPFrom:              env("SMTP_FROM", ""),
+		InternalAPIToken:      env("INTERNAL_API_TOKEN", ""),
 	}
 }
 

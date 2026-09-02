@@ -13,6 +13,7 @@ import (
 	"chateauneuf-portaria-backend/internal/database"
 	"chateauneuf-portaria-backend/internal/google"
 	"chateauneuf-portaria-backend/internal/handler"
+	"chateauneuf-portaria-backend/internal/mailer"
 	"chateauneuf-portaria-backend/internal/photos"
 	"chateauneuf-portaria-backend/internal/repository"
 	syncworker "chateauneuf-portaria-backend/internal/sync"
@@ -50,6 +51,7 @@ func main() {
 	syncService := syncworker.NewService(accessLogRepo, diaristaRepo, keyRepo, residentRepo, scheduledServiceRepo, shoppingRepo, sheetsClient, logger)
 	accessLogService := usecase.NewAccessLogService(accessLogRepo, syncService)
 	residentService := usecase.NewResidentService(residentRepo)
+	internetCredentialService := usecase.NewInternetCredentialService(residentService, mailer.NewGmail(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom))
 	keyService := usecase.NewKeyService(keyRepo)
 	diaristaService := usecase.NewDiaristaService(diaristaRepo)
 	scheduledService := usecase.NewScheduledServiceService(scheduledServiceRepo)
@@ -58,16 +60,18 @@ func main() {
 	photoStore := photos.NewStore(cfg.PhotoStorageDir)
 
 	router := handler.NewRouter(handler.RouterDeps{
-		AccessLogService:   accessLogService,
-		ResidentService:    residentService,
-		KeyService:         keyService,
-		DiaristaService:    diaristaService,
-		ScheduledService:   scheduledService,
-		ShoppingService:    shoppingService,
-		ReservationService: reservationService,
-		SyncService:        syncService,
-		PhotoStore:         photoStore,
-		AllowedOrigin:      cfg.AllowedOrigin,
+		AccessLogService:          accessLogService,
+		ResidentService:           residentService,
+		KeyService:                keyService,
+		DiaristaService:           diaristaService,
+		ScheduledService:          scheduledService,
+		ShoppingService:           shoppingService,
+		ReservationService:        reservationService,
+		SyncService:               syncService,
+		PhotoStore:                photoStore,
+		AllowedOrigin:             cfg.AllowedOrigin,
+		InternetCredentialService: internetCredentialService,
+		InternalAPIToken:          cfg.InternalAPIToken,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

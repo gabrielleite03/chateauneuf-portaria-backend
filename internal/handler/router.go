@@ -10,21 +10,24 @@ import (
 )
 
 type RouterDeps struct {
-	AccessLogService   *usecase.AccessLogService
-	ResidentService    *usecase.ResidentService
-	KeyService         *usecase.KeyService
-	DiaristaService    *usecase.DiaristaService
-	ScheduledService   *usecase.ScheduledServiceService
-	ShoppingService    *usecase.ShoppingService
-	ReservationService *usecase.ReservationService
-	SyncService        usecase.SyncService
-	PhotoStore         *photos.Store
-	AllowedOrigin      string
+	AccessLogService          *usecase.AccessLogService
+	ResidentService           *usecase.ResidentService
+	KeyService                *usecase.KeyService
+	DiaristaService           *usecase.DiaristaService
+	ScheduledService          *usecase.ScheduledServiceService
+	ShoppingService           *usecase.ShoppingService
+	ReservationService        *usecase.ReservationService
+	SyncService               usecase.SyncService
+	PhotoStore                *photos.Store
+	AllowedOrigin             string
+	InternetCredentialService *usecase.InternetCredentialService
+	InternalAPIToken          string
 }
 
 func NewRouter(deps RouterDeps) http.Handler {
 	accessLogHandler := NewAccessLogHandler(deps.AccessLogService, deps.PhotoStore)
 	residentHandler := NewResidentHandler(deps.ResidentService)
+	internetCredentialHandler := NewInternetCredentialHandler(deps.InternetCredentialService, deps.InternalAPIToken)
 	keyHandler := NewKeyHandler(deps.KeyService)
 	diaristaHandler := NewDiaristaHandler(deps.DiaristaService, deps.PhotoStore)
 	scheduledServiceHandler := NewScheduledServiceHandler(deps.ScheduledService, deps.PhotoStore)
@@ -39,6 +42,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 	mux.HandleFunc("PATCH /api/access-logs/{id}/checkout", accessLogHandler.Checkout)
 	mux.HandleFunc("GET /api/residents", residentHandler.List)
 	mux.HandleFunc("POST /api/residents", residentHandler.Upsert)
+	mux.HandleFunc("POST /internal/residents/internet-credentials", internetCredentialHandler.Send)
 	mux.HandleFunc("GET /api/keys", keyHandler.List)
 	mux.HandleFunc("POST /api/keys", keyHandler.Create)
 	mux.HandleFunc("POST /api/keys/return", keyHandler.Return)
