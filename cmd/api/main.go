@@ -48,30 +48,41 @@ func main() {
 		logger.Error("failed to create google sheets client", "error", err)
 		os.Exit(1)
 	}
-	syncService := syncworker.NewService(accessLogRepo, diaristaRepo, keyRepo, residentRepo, scheduledServiceRepo, shoppingRepo, sheetsClient, logger)
+	syncService := syncworker.NewService(accessLogRepo, diaristaRepo, keyRepo, residentRepo, scheduledServiceRepo, shoppingRepo, reservationRepo, sheetsClient, logger)
 	accessLogService := usecase.NewAccessLogService(accessLogRepo, syncService)
 	residentService := usecase.NewResidentService(residentRepo)
-	internetCredentialService := usecase.NewInternetCredentialService(residentService, mailer.NewGmail(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom))
+	gmail := mailer.NewGmail(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom)
+	gmail.SetBCC(cfg.SMTPBCC)
+	internetCredentialService := usecase.NewInternetCredentialService(residentService, gmail)
 	keyService := usecase.NewKeyService(keyRepo)
 	diaristaService := usecase.NewDiaristaService(diaristaRepo)
 	scheduledService := usecase.NewScheduledServiceService(scheduledServiceRepo)
 	shoppingService := usecase.NewShoppingService(shoppingRepo)
 	reservationService := usecase.NewReservationService(reservationRepo)
+	reservationSignatureService := usecase.NewReservationSignatureService(db, residentService, gmail)
+	shoppingService.SetArrivalNotifier(reservationSignatureService)
+	deliveryPhotoService := usecase.NewDeliveryPhotoService(db)
+	deliveryWithdrawalService := usecase.NewDeliveryWithdrawalSignatureService(db, residentService, gmail)
+	reservationService.SetCancellationNotifier(reservationSignatureService)
 	photoStore := photos.NewStore(cfg.PhotoStorageDir)
 
 	router := handler.NewRouter(handler.RouterDeps{
-		AccessLogService:          accessLogService,
-		ResidentService:           residentService,
-		KeyService:                keyService,
-		DiaristaService:           diaristaService,
-		ScheduledService:          scheduledService,
-		ShoppingService:           shoppingService,
-		ReservationService:        reservationService,
-		SyncService:               syncService,
-		PhotoStore:                photoStore,
-		AllowedOrigin:             cfg.AllowedOrigin,
-		InternetCredentialService: internetCredentialService,
-		InternalAPIToken:          cfg.InternalAPIToken,
+		AccessLogService:            accessLogService,
+		ResidentService:             residentService,
+		KeyService:                  keyService,
+		DiaristaService:             diaristaService,
+		ScheduledService:            scheduledService,
+		ShoppingService:             shoppingService,
+		ReservationService:          reservationService,
+		ReservationGuestService:     usecase.NewReservationGuestService(db),
+		ReservationSignatureService: reservationSignatureService,
+		DeliveryPhotoService:        deliveryPhotoService,
+		DeliveryWithdrawalService:   deliveryWithdrawalService,
+		SyncService:                 syncService,
+		PhotoStore:                  photoStore,
+		AllowedOrigin:               cfg.AllowedOrigin,
+		InternetCredentialService:   internetCredentialService,
+		InternalAPIToken:            cfg.InternalAPIToken,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

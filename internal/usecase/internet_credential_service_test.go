@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,9 +19,16 @@ func (r credentialResidentRepository) Upsert(context.Context, domain.Resident) (
 	return nil, nil
 }
 
-type recordingEmailSender struct{ to string }
+type recordingEmailSender struct {
+	to   string
+	body string
+}
 
-func (s *recordingEmailSender) Send(_ context.Context, to, _, _ string) error { s.to = to; return nil }
+func (s *recordingEmailSender) Send(_ context.Context, to, _, body string) error {
+	s.to = to
+	s.body = body
+	return nil
+}
 
 func TestInternetCredentialRecipientPriority(t *testing.T) {
 	tests := []struct {
@@ -42,6 +50,19 @@ func TestInternetCredentialRecipientPriority(t *testing.T) {
 				t.Fatalf("got %q want %q", sender.to, tt.want)
 			}
 		})
+	}
+}
+
+func TestInternetCredentialEmailUsesPortalLayoutAndListsSSIDs(t *testing.T) {
+	sender := &recordingEmailSender{}
+	service := NewInternetCredentialService(NewResidentService(credentialResidentRepository{rows: []domain.Resident{{Unit: "13", Owner: "Maria & João", Email: "resident@example.com"}}}), sender)
+	if _, err := service.Send(context.Background(), "13", "apto<13>", "A&B123", time.Date(2026, 12, 1, 12, 0, 0, 0, time.Local)); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"Condomínio Edifício Chateauneuf", "CHATEAUNEUF", "CHATEAUNEUF_5GHz", "Maria &amp; João", "apto&lt;13&gt;", "A&amp;B123", "90 dias", "01/12/2026"} {
+		if !strings.Contains(sender.body, expected) {
+			t.Errorf("email body does not contain %q", expected)
+		}
 	}
 }
 

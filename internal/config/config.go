@@ -24,6 +24,7 @@ type Config struct {
 	SMTPUsername          string
 	SMTPPassword          string
 	SMTPFrom              string
+	SMTPBCC               string
 	InternalAPIToken      string
 }
 
@@ -46,6 +47,7 @@ func Load() Config {
 		SMTPUsername:          env("SMTP_USERNAME", ""),
 		SMTPPassword:          env("SMTP_PASSWORD", ""),
 		SMTPFrom:              env("SMTP_FROM", ""),
+		SMTPBCC:               env("SMTP_BCC", ""),
 		InternalAPIToken:      env("INTERNAL_API_TOKEN", ""),
 	}
 }

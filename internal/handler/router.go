@@ -10,18 +10,22 @@ import (
 )
 
 type RouterDeps struct {
-	AccessLogService          *usecase.AccessLogService
-	ResidentService           *usecase.ResidentService
-	KeyService                *usecase.KeyService
-	DiaristaService           *usecase.DiaristaService
-	ScheduledService          *usecase.ScheduledServiceService
-	ShoppingService           *usecase.ShoppingService
-	ReservationService        *usecase.ReservationService
-	SyncService               usecase.SyncService
-	PhotoStore                *photos.Store
-	AllowedOrigin             string
-	InternetCredentialService *usecase.InternetCredentialService
-	InternalAPIToken          string
+	ReservationGuestService     *usecase.ReservationGuestService
+	AccessLogService            *usecase.AccessLogService
+	ResidentService             *usecase.ResidentService
+	KeyService                  *usecase.KeyService
+	DiaristaService             *usecase.DiaristaService
+	ScheduledService            *usecase.ScheduledServiceService
+	ShoppingService             *usecase.ShoppingService
+	ReservationService          *usecase.ReservationService
+	ReservationSignatureService *usecase.ReservationSignatureService
+	DeliveryPhotoService        *usecase.DeliveryPhotoService
+	DeliveryWithdrawalService   *usecase.DeliveryWithdrawalSignatureService
+	SyncService                 usecase.SyncService
+	PhotoStore                  *photos.Store
+	AllowedOrigin               string
+	InternetCredentialService   *usecase.InternetCredentialService
+	InternalAPIToken            string
 }
 
 func NewRouter(deps RouterDeps) http.Handler {
@@ -33,9 +37,18 @@ func NewRouter(deps RouterDeps) http.Handler {
 	scheduledServiceHandler := NewScheduledServiceHandler(deps.ScheduledService, deps.PhotoStore)
 	shoppingHandler := NewShoppingHandler(deps.ShoppingService, deps.PhotoStore)
 	reservationHandler := NewReservationHandler(deps.ReservationService)
+	signatureHandler := NewReservationSignatureHandler(deps.ReservationSignatureService)
+	deliveryPhotoHandler := NewDeliveryPhotoHandler(deps.DeliveryPhotoService)
+	deliveryWithdrawalHandler := NewDeliveryWithdrawalSignatureHandler(deps.DeliveryWithdrawalService)
 	syncHandler := NewSyncHandler(deps.SyncService)
 
 	mux := http.NewServeMux()
+	if deps.ReservationGuestService != nil {
+		guests := &ReservationGuestHandler{service: deps.ReservationGuestService}
+		mux.HandleFunc("GET /api/reservations/{id}/guests", guests.List)
+		mux.HandleFunc("POST /api/reservations/{id}/guests", guests.Add)
+		mux.HandleFunc("PATCH /api/reservations/{id}/guests/{guestID}", guests.Confirm)
+	}
 	mux.HandleFunc("POST /api/access-logs", accessLogHandler.Create)
 	mux.HandleFunc("GET /api/access-logs", accessLogHandler.List)
 	mux.HandleFunc("GET /api/access-logs/open", accessLogHandler.ListOpen)
@@ -61,6 +74,17 @@ func NewRouter(deps RouterDeps) http.Handler {
 	mux.HandleFunc("POST /api/reservations", reservationHandler.Create)
 	mux.HandleFunc("POST /api/reservations/status", reservationHandler.UpdateStatus)
 	mux.HandleFunc("POST /api/reservations/delete", reservationHandler.Delete)
+	mux.HandleFunc("POST /api/reservations/{id}/signature-code", signatureHandler.CreateCode)
+	mux.HandleFunc("POST /api/signatures/lookup", signatureHandler.Lookup)
+	mux.HandleFunc("POST /api/signatures/confirm", signatureHandler.Confirm)
+	mux.HandleFunc("GET /api/reservations/{id}/signed-document", signatureHandler.Document)
+	mux.HandleFunc("POST /api/delivery-photo-sessions", deliveryPhotoHandler.Create)
+	mux.HandleFunc("GET /api/delivery-photo-sessions/{id}", deliveryPhotoHandler.Status)
+	mux.HandleFunc("POST /api/delivery-photo-sessions/upload", deliveryPhotoHandler.Upload)
+	mux.HandleFunc("POST /api/shopping/{id}/withdrawal-signature-code", deliveryWithdrawalHandler.CreateCode)
+	mux.HandleFunc("GET /api/shopping/{id}/withdrawal-signature-status", deliveryWithdrawalHandler.Status)
+	mux.HandleFunc("POST /api/delivery-withdrawal-signatures/lookup", deliveryWithdrawalHandler.Lookup)
+	mux.HandleFunc("POST /api/delivery-withdrawal-signatures/confirm", deliveryWithdrawalHandler.Confirm)
 	mux.HandleFunc("GET /api/sync/status", syncHandler.Status)
 	mux.HandleFunc("POST /api/sync/run", syncHandler.Run)
 	mux.HandleFunc("POST /api/sync/import", syncHandler.ImportAccessLogs)

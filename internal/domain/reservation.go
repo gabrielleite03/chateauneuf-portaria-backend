@@ -22,6 +22,7 @@ type CommonAreaReservation struct {
 	Notes           string            `json:"notes,omitempty"`
 	Status          ReservationStatus `json:"status"`
 	SyncStatus      SyncStatus        `json:"syncStatus"`
+	Signed          bool              `json:"signed"`
 	CreatedAt       time.Time         `json:"createdAt"`
 	UpdatedAt       time.Time         `json:"updatedAt"`
 }

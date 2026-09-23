@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 
 	"chateauneuf-portaria-backend/internal/domain"
@@ -23,7 +24,13 @@ const (
 )
 
 type ReservationService struct {
-	repository ReservationRepository
+	repository           ReservationRepository
+	cancellationNotifier ReservationCancellationNotifier
+	statusMu             sync.Mutex
+}
+
+type ReservationCancellationNotifier interface {
+	NotifyCancellation(context.Context, domain.CommonAreaReservation) error
 }
 
 type CreateReservationInput struct {
@@ -48,6 +55,10 @@ type DeleteReservationInput struct {
 
 func NewReservationService(repository ReservationRepository) *ReservationService {
 	return &ReservationService{repository: repository}
+}
+
+func (s *ReservationService) SetCancellationNotifier(notifier ReservationCancellationNotifier) {
+	s.cancellationNotifier = notifier
 }
 
 func (s *ReservationService) List(ctx context.Context) ([]domain.CommonAreaReservation, error) {
@@ -102,6 +113,8 @@ func (s *ReservationService) Create(ctx context.Context, input CreateReservation
 }
 
 func (s *ReservationService) UpdateStatus(ctx context.Context, input UpdateReservationStatusInput) (*domain.CommonAreaReservation, error) {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
 	status := domain.ReservationStatus(strings.TrimSpace(input.Status))
 	if strings.TrimSpace(input.ID) == "" || !status.IsValid() {
 		return nil, domain.ErrInvalidInput
@@ -111,6 +124,9 @@ func (s *ReservationService) UpdateStatus(ctx context.Context, input UpdateReser
 		if err != nil {
 			return nil, err
 		}
+		if reservation.Status == domain.ReservationStatusCanceled {
+			return reservation, nil
+		}
 		reservationDate, err := time.ParseInLocation("2006-01-02", reservation.ReservationDate, time.Local)
 		if err != nil {
 			return nil, domain.ErrInvalidInput
@@ -119,7 +135,16 @@ func (s *ReservationService) UpdateStatus(ctx context.Context, input UpdateReser
 			return nil, domain.ErrCancellationDeadline
 		}
 	}
-	return s.repository.UpdateStatus(ctx, strings.TrimSpace(input.ID), status)
+	updated, err := s.repository.UpdateStatus(ctx, strings.TrimSpace(input.ID), status)
+	if err != nil {
+		return nil, err
+	}
+	if status == domain.ReservationStatusCanceled && s.cancellationNotifier != nil {
+		if err = s.cancellationNotifier.NotifyCancellation(ctx, *updated); err != nil {
+			return nil, err
+		}
+	}
+	return updated, nil
 }
 
 func (s *ReservationService) Delete(ctx context.Context, input DeleteReservationInput) error {

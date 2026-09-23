@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"chateauneuf-portaria-backend/internal/domain"
@@ -21,9 +22,12 @@ type SpreadsheetClient interface {
 	AppendKeyRecord(ctx context.Context, key domain.KeyRecord) error
 	AppendScheduledService(ctx context.Context, service domain.ScheduledService) error
 	AppendShoppingDelivery(ctx context.Context, delivery domain.ShoppingDelivery) error
+	AppendReservation(ctx context.Context, reservation domain.CommonAreaReservation) error
 }
 
 type Service struct {
+	runMu                      sync.Mutex
+	reservationRepository      ReservationRepository
 	repository                 usecase.AccessLogRepository
 	diaristaRepository         DiaristaRepository
 	keyRepository              KeyRepository
@@ -72,7 +76,14 @@ type ShoppingRepository interface {
 	SyncStats(ctx context.Context) (int, error)
 }
 
-func NewService(repository usecase.AccessLogRepository, diaristaRepository DiaristaRepository, keyRepository KeyRepository, residentRepository ResidentRepository, scheduledServiceRepository ScheduledServiceRepository, shoppingRepository ShoppingRepository, client SpreadsheetClient, logger *slog.Logger) *Service {
+type ReservationRepository interface {
+	ListPendingSync(context.Context, int) ([]domain.CommonAreaReservation, error)
+	MarkSynced(context.Context, string, time.Time, time.Time) error
+	MarkSyncError(context.Context, string, time.Time, string) error
+	SyncStats(context.Context) (usecase.SyncStats, error)
+}
+
+func NewService(repository usecase.AccessLogRepository, diaristaRepository DiaristaRepository, keyRepository KeyRepository, residentRepository ResidentRepository, scheduledServiceRepository ScheduledServiceRepository, shoppingRepository ShoppingRepository, reservationRepository ReservationRepository, client SpreadsheetClient, logger *slog.Logger) *Service {
 	return &Service{
 		repository:                 repository,
 		diaristaRepository:         diaristaRepository,
@@ -80,6 +91,7 @@ func NewService(repository usecase.AccessLogRepository, diaristaRepository Diari
 		residentRepository:         residentRepository,
 		scheduledServiceRepository: scheduledServiceRepository,
 		shoppingRepository:         shoppingRepository,
+		reservationRepository:      reservationRepository,
 		client:                     client,
 		logger:                     logger,
 	}
@@ -108,6 +120,11 @@ func (s *Service) Start(ctx context.Context, interval time.Duration) {
 }
 
 func (s *Service) RunOnce(ctx context.Context) error {
+	// Startup, periodic and manual syncs must not append the same records concurrently.
+	if !s.runMu.TryLock() {
+		return nil
+	}
+	defer s.runMu.Unlock()
 	if err := s.client.Ping(ctx); err != nil {
 		return nil
 	}
@@ -212,6 +229,28 @@ func (s *Service) RunOnce(ctx context.Context) error {
 		}
 	}
 
+	return s.syncReservations(ctx)
+}
+
+func (s *Service) syncReservations(ctx context.Context) error {
+	if s.reservationRepository == nil {
+		return nil
+	}
+	reservations, err := s.reservationRepository.ListPendingSync(ctx, 50)
+	if err != nil {
+		return err
+	}
+	for _, reservation := range reservations {
+		if err := s.client.AppendReservation(ctx, reservation); err != nil {
+			if markErr := s.reservationRepository.MarkSyncError(ctx, reservation.ID, reservation.UpdatedAt, err.Error()); markErr != nil {
+				return markErr
+			}
+			continue
+		}
+		if err := s.reservationRepository.MarkSynced(ctx, reservation.ID, reservation.UpdatedAt, time.Now()); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -359,6 +398,19 @@ func (s *Service) Status(ctx context.Context) (usecase.SyncStatus, error) {
 		stats.PendingCount += shoppingPendingCount
 	}
 
+	if s.reservationRepository != nil {
+		reservationStats, err := s.reservationRepository.SyncStats(ctx)
+		if err != nil {
+			return usecase.SyncStatus{}, err
+		}
+		stats.PendingCount += reservationStats.PendingCount
+		if reservationStats.LastError != "" {
+			stats.LastError = reservationStats.LastError
+		}
+		if reservationStats.LastSyncedAt != nil && (stats.LastSyncedAt == nil || reservationStats.LastSyncedAt.After(*stats.LastSyncedAt)) {
+			stats.LastSyncedAt = reservationStats.LastSyncedAt
+		}
+	}
 	pingErr := s.client.Ping(ctx)
 	lastError := stats.LastError
 	if pingErr != nil {

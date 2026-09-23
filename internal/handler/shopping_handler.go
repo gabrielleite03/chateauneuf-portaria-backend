@@ -33,6 +33,7 @@ func (h *ShoppingHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "JSON invalido", "VALIDATION_ERROR")
 		return
 	}
+	originalPhoto := input.Photo
 	if h.photoStore != nil {
 		photo, err := h.photoStore.SaveDataURL(r.Context(), "compras", input.Photo)
 		if err != nil {
@@ -41,6 +42,7 @@ func (h *ShoppingHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		input.Photo = photo
 	}
+	input.EmailPhoto = originalPhoto
 
 	delivery, err := h.service.Create(r.Context(), input)
 	if err != nil {

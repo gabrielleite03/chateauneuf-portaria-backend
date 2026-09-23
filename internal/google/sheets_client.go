@@ -676,12 +676,12 @@ func (c *SheetsClient) findRowByLocalID(ctx context.Context, sheetName string, t
 
 func (c *SheetsClient) findAccessLogRows(ctx context.Context, accessLog domain.AccessLog) ([]int, error) {
 	if strings.TrimSpace(accessLog.ExternalID) != "" {
-		rowIndex, err := c.findRowByColumnValue(ctx, c.sheetName, "T", accessLog.ExternalID)
+		rowIndexes, err := c.findRowsByColumnValue(ctx, c.sheetName, "T", accessLog.ExternalID)
 		if err != nil {
 			return nil, err
 		}
-		if rowIndex > 0 {
-			return []int{rowIndex}, nil
+		if len(rowIndexes) > 0 {
+			return rowIndexes, nil
 		}
 	}
 	return c.findRowsByColumnValue(ctx, c.sheetName, "A", strconv.FormatInt(accessLog.ID, 10))

@@ -14,7 +14,10 @@ type ShoppingRepository interface {
 }
 
 type ShoppingService struct {
-	repository ShoppingRepository
+	repository      ShoppingRepository
+	arrivalNotifier interface {
+		NotifyDeliveryArrival(context.Context, domain.ShoppingDelivery, string) error
+	}
 }
 
 type CreateShoppingInput struct {
@@ -26,6 +29,7 @@ type CreateShoppingInput struct {
 	Product     string `json:"product"`
 	Notes       string `json:"notes"`
 	Photo       string `json:"photo"`
+	EmailPhoto  string `json:"-"`
 }
 
 type WithdrawShoppingInput struct {
@@ -34,6 +38,12 @@ type WithdrawShoppingInput struct {
 
 func NewShoppingService(repository ShoppingRepository) *ShoppingService {
 	return &ShoppingService{repository: repository}
+}
+
+func (s *ShoppingService) SetArrivalNotifier(notifier interface {
+	NotifyDeliveryArrival(context.Context, domain.ShoppingDelivery, string) error
+}) {
+	s.arrivalNotifier = notifier
 }
 
 func (s *ShoppingService) List(ctx context.Context) ([]domain.ShoppingDelivery, error) {
@@ -48,7 +58,7 @@ func (s *ShoppingService) Create(ctx context.Context, input CreateShoppingInput)
 		return nil, domain.ErrInvalidInput
 	}
 
-	return s.repository.Create(ctx, domain.ShoppingDelivery{
+	delivery, err := s.repository.Create(ctx, domain.ShoppingDelivery{
 		Unit:        strings.TrimSpace(input.Unit),
 		Recipient:   strings.TrimSpace(input.Recipient),
 		CourierName: strings.TrimSpace(input.CourierName),
@@ -60,6 +70,13 @@ func (s *ShoppingService) Create(ctx context.Context, input CreateShoppingInput)
 		Status:      domain.ShoppingStatusWaiting,
 		SyncStatus:  domain.SyncStatusPending,
 	})
+	if err != nil {
+		return nil, err
+	}
+	if s.arrivalNotifier != nil && strings.TrimSpace(input.EmailPhoto) != "" {
+		_ = s.arrivalNotifier.NotifyDeliveryArrival(ctx, *delivery, input.EmailPhoto)
+	}
+	return delivery, nil
 }
 
 func (s *ShoppingService) Withdraw(ctx context.Context, input WithdrawShoppingInput) (*domain.ShoppingDelivery, error) {

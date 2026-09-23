@@ -22,9 +22,13 @@ func NewSQLiteReservationRepository(db *sql.DB) *SQLiteReservationRepository {
 func (r *SQLiteReservationRepository) List(ctx context.Context) ([]domain.CommonAreaReservation, error) {
 	return r.queryReservations(ctx, `
 		SELECT id, area, resident_name, unit, reservation_date, start_time, end_time,
-			guests, notes, status, sync_status, created_at, updated_at
+			guests, notes, status, sync_status, created_at, updated_at,
+			EXISTS(SELECT 1 FROM reservation_signatures rs WHERE rs.reservation_id = common_area_reservations.id AND rs.consumed_at IS NOT NULL)
 		FROM common_area_reservations
-		ORDER BY reservation_date DESC, start_time DESC, id DESC
+		ORDER BY
+			CASE WHEN status = 'reservada' AND NOT EXISTS(SELECT 1 FROM reservation_signatures rs WHERE rs.reservation_id = common_area_reservations.id AND rs.consumed_at IS NOT NULL) THEN 0 ELSE 1 END,
+			CASE WHEN status = 'reservada' THEN 0 ELSE 1 END,
+			reservation_date ASC, start_time ASC, id DESC
 	`)
 }
 
@@ -116,7 +120,8 @@ func (r *SQLiteReservationRepository) Delete(ctx context.Context, id string) err
 func (r *SQLiteReservationRepository) FindByID(ctx context.Context, id int64) (*domain.CommonAreaReservation, error) {
 	reservations, err := r.queryReservations(ctx, `
 		SELECT id, area, resident_name, unit, reservation_date, start_time, end_time,
-			guests, notes, status, sync_status, created_at, updated_at
+			guests, notes, status, sync_status, created_at, updated_at,
+			EXISTS(SELECT 1 FROM reservation_signatures rs WHERE rs.reservation_id = common_area_reservations.id AND rs.consumed_at IS NOT NULL)
 		FROM common_area_reservations
 		WHERE id = ?
 	`, id)
@@ -162,6 +167,7 @@ func (r *SQLiteReservationRepository) queryReservations(ctx context.Context, que
 			&reservation.SyncStatus,
 			&reservation.CreatedAt,
 			&reservation.UpdatedAt,
+			&reservation.Signed,
 		); err != nil {
 			return nil, fmt.Errorf("scan common area reservation: %w", err)
 		}
