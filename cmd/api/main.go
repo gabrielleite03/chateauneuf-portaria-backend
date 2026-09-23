@@ -69,6 +69,7 @@ func main() {
 	router := handler.NewRouter(handler.RouterDeps{
 		AccessLogService:            accessLogService,
 		ResidentService:             residentService,
+		ResidentVehicleService:      usecase.NewResidentVehicleService(db),
 		KeyService:                  keyService,
 		DiaristaService:             diaristaService,
 		ScheduledService:            scheduledService,

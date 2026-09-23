@@ -1,0 +1,9 @@
+CREATE TABLE resident_vehicles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  unit TEXT NOT NULL REFERENCES residents(unit) ON DELETE CASCADE,
+  plate TEXT NOT NULL,
+  brand TEXT NOT NULL,
+  model TEXT NOT NULL,
+  color TEXT NOT NULL,
+  UNIQUE(unit, plate)
+);

@@ -10,6 +10,7 @@ import (
 )
 
 type RouterDeps struct {
+	ResidentVehicleService      *usecase.ResidentVehicleService
 	ReservationGuestService     *usecase.ReservationGuestService
 	AccessLogService            *usecase.AccessLogService
 	ResidentService             *usecase.ResidentService
@@ -43,6 +44,13 @@ func NewRouter(deps RouterDeps) http.Handler {
 	syncHandler := NewSyncHandler(deps.SyncService)
 
 	mux := http.NewServeMux()
+	if deps.ResidentVehicleService != nil {
+		vehicles := &ResidentVehicleHandler{service: deps.ResidentVehicleService}
+		mux.HandleFunc("GET /api/residents/{unit}/vehicles", vehicles.List)
+		mux.HandleFunc("POST /api/residents/{unit}/vehicles", vehicles.Save)
+		mux.HandleFunc("PUT /api/residents/{unit}/vehicles/{vehicleID}", vehicles.Save)
+		mux.HandleFunc("DELETE /api/residents/{unit}/vehicles/{vehicleID}", vehicles.Delete)
+	}
 	if deps.ReservationGuestService != nil {
 		guests := &ReservationGuestHandler{service: deps.ReservationGuestService}
 		mux.HandleFunc("GET /api/reservations/{id}/guests", guests.List)
