@@ -153,6 +153,7 @@ var residentHeaders = []interface{}{
 	"E-mail Morador",
 	"E-mail Inquilino",
 	"Telefone Inquilino",
+	"TERCEIROS AUTORIZADOS PARA ENCOMENDAS",
 }
 
 func NewSheetsClient(ctx context.Context, spreadsheetID, sheetName, credentialsFile string, driveFolderID string) (*SheetsClient, error) {
@@ -315,7 +316,7 @@ func (c *SheetsClient) AppendResident(ctx context.Context, resident domain.Resid
 		return err
 	}
 	if rowIndex > 0 {
-		updateRange := fmt.Sprintf("%s!A%d:L%d", quoteSheetName(residentSheetName), rowIndex, rowIndex)
+		updateRange := fmt.Sprintf("%s!A%d:M%d", quoteSheetName(residentSheetName), rowIndex, rowIndex)
 		_, err := c.service.Spreadsheets.Values.Update(c.spreadsheetID, updateRange, &sheets.ValueRange{
 			Values: [][]interface{}{row},
 		}).ValueInputOption("USER_ENTERED").Context(ctx).Do()
@@ -325,7 +326,7 @@ func (c *SheetsClient) AppendResident(ctx context.Context, resident domain.Resid
 		return nil
 	}
 
-	appendRange := fmt.Sprintf("%s!A:L", quoteSheetName(residentSheetName))
+	appendRange := fmt.Sprintf("%s!A:M", quoteSheetName(residentSheetName))
 	_, err = c.service.Spreadsheets.Values.Append(c.spreadsheetID, appendRange, &sheets.ValueRange{
 		Values: [][]interface{}{row},
 	}).ValueInputOption("USER_ENTERED").InsertDataOption("INSERT_ROWS").Context(ctx).Do()
@@ -347,7 +348,7 @@ func (c *SheetsClient) ReadResidents(ctx context.Context) ([]domain.Resident, er
 		return nil, err
 	}
 
-	readRange := fmt.Sprintf("%s!A2:L", quoteSheetName(residentSheetName))
+	readRange := fmt.Sprintf("%s!A2:M", quoteSheetName(residentSheetName))
 	response, err := c.service.Spreadsheets.Values.Get(c.spreadsheetID, readRange).Context(ctx).Do()
 	if err != nil {
 		return nil, fmt.Errorf("read residents from sheets: %w", err)
@@ -598,7 +599,7 @@ func (c *SheetsClient) ensureKeyHeaders(ctx context.Context) error {
 }
 
 func (c *SheetsClient) ensureResidentHeaders(ctx context.Context) error {
-	return c.ensureSheetHeaders(ctx, residentSheetName, residentHeaders, "A1:L1")
+	return c.ensureSheetHeaders(ctx, residentSheetName, residentHeaders, "A1:M1")
 }
 
 func (c *SheetsClient) ensureScheduledServiceHeaders(ctx context.Context) error {
@@ -816,6 +817,7 @@ func residentRow(resident domain.Resident, syncedAt time.Time, ownerPhotoCell st
 		resident.Email,
 		resident.TenantEmail,
 		resident.TenantPhone,
+		resident.AuthorizedRecipients,
 	}
 }
 
@@ -827,18 +829,19 @@ func residentFromSheetRow(row []interface{}) (domain.Resident, bool) {
 
 	updatedAt := parseSheetDateTimeOrDefault(cell(row, 7), "", time.Now())
 	return domain.Resident{
-		Unit:          unit,
-		Owner:         cell(row, 1),
-		Phones:        cell(row, 2),
-		Tenant:        cell(row, 3),
-		TenantPhoto:   normalizeSheetPhoto(cell(row, 4)),
-		FamilyMembers: strings.TrimSpace(cell(row, 5)),
-		Photo:         normalizeSheetPhoto(cell(row, 6)),
-		Email:         cell(row, 9),
-		TenantEmail:   cell(row, 10),
-		TenantPhone:   cell(row, 11),
-		SyncStatus:    domain.SyncStatusSynced,
-		LastUpdated:   updatedAt,
+		Unit:                 unit,
+		Owner:                cell(row, 1),
+		Phones:               cell(row, 2),
+		Tenant:               cell(row, 3),
+		TenantPhoto:          normalizeSheetPhoto(cell(row, 4)),
+		FamilyMembers:        strings.TrimSpace(cell(row, 5)),
+		Photo:                normalizeSheetPhoto(cell(row, 6)),
+		Email:                cell(row, 9),
+		TenantEmail:          cell(row, 10),
+		TenantPhone:          cell(row, 11),
+		AuthorizedRecipients: cell(row, 12),
+		SyncStatus:           domain.SyncStatusSynced,
+		LastUpdated:          updatedAt,
 	}, true
 }
 

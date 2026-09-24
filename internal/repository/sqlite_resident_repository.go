@@ -21,7 +21,7 @@ func NewSQLiteResidentRepository(db *sql.DB) *SQLiteResidentRepository {
 func (r *SQLiteResidentRepository) List(ctx context.Context) ([]domain.Resident, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT unit, owner, phones, tenant, tenant_photo, family_members, photo, sync_status, updated_at,
-			email, tenant_email, tenant_phone
+			email, tenant_email, tenant_phone, authorized_recipients
 		FROM residents
 		ORDER BY unit ASC
 	`)
@@ -46,6 +46,7 @@ func (r *SQLiteResidentRepository) List(ctx context.Context) ([]domain.Resident,
 			&resident.Email,
 			&resident.TenantEmail,
 			&resident.TenantPhone,
+			&resident.AuthorizedRecipients,
 		); err != nil {
 			return nil, fmt.Errorf("scan resident: %w", err)
 		}
@@ -63,8 +64,8 @@ func (r *SQLiteResidentRepository) Upsert(ctx context.Context, resident domain.R
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO residents (
 			unit, owner, phones, tenant, tenant_photo, family_members, photo, sync_status, sync_error, created_at, updated_at, synced_at,
-			email, tenant_email, tenant_phone
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)
+			email, tenant_email, tenant_phone, authorized_recipients
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(unit) DO UPDATE SET
 			owner = excluded.owner,
 			phones = excluded.phones,
@@ -72,6 +73,7 @@ func (r *SQLiteResidentRepository) Upsert(ctx context.Context, resident domain.R
 			email = excluded.email,
 			tenant_email = excluded.tenant_email,
 			tenant_phone = excluded.tenant_phone,
+			authorized_recipients = excluded.authorized_recipients,
 			tenant_photo = excluded.tenant_photo,
 			family_members = excluded.family_members,
 			photo = excluded.photo,
@@ -80,14 +82,14 @@ func (r *SQLiteResidentRepository) Upsert(ctx context.Context, resident domain.R
 			updated_at = excluded.updated_at,
 			synced_at = excluded.synced_at
 	`, resident.Unit, resident.Owner, resident.Phones, resident.Tenant, resident.TenantPhoto, resident.FamilyMembers,
-		resident.Photo, resident.SyncStatus, now, now, now, resident.Email, resident.TenantEmail, resident.TenantPhone)
+		resident.Photo, resident.SyncStatus, now, now, now, resident.Email, resident.TenantEmail, resident.TenantPhone, resident.AuthorizedRecipients)
 	if err != nil {
 		return nil, fmt.Errorf("upsert resident: %w", err)
 	}
 
 	row := r.db.QueryRowContext(ctx, `
 		SELECT unit, owner, phones, tenant, tenant_photo, family_members, photo, sync_status, updated_at,
-			email, tenant_email, tenant_phone
+			email, tenant_email, tenant_phone, authorized_recipients
 		FROM residents
 		WHERE unit = ?
 	`, resident.Unit)
@@ -106,6 +108,7 @@ func (r *SQLiteResidentRepository) Upsert(ctx context.Context, resident domain.R
 		&updated.Email,
 		&updated.TenantEmail,
 		&updated.TenantPhone,
+		&updated.AuthorizedRecipients,
 	); err != nil {
 		return nil, fmt.Errorf("read resident after upsert: %w", err)
 	}
@@ -124,8 +127,8 @@ func (r *SQLiteResidentRepository) UpsertImported(ctx context.Context, resident 
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO residents (
 			unit, owner, phones, tenant, tenant_photo, family_members, photo, sync_status, sync_error, created_at, updated_at, synced_at,
-			email, tenant_email, tenant_phone
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)
+			email, tenant_email, tenant_phone, authorized_recipients
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(unit) DO UPDATE SET
 			owner = excluded.owner,
 			phones = excluded.phones,
@@ -133,6 +136,7 @@ func (r *SQLiteResidentRepository) UpsertImported(ctx context.Context, resident 
 			email = excluded.email,
 			tenant_email = excluded.tenant_email,
 			tenant_phone = excluded.tenant_phone,
+			authorized_recipients = excluded.authorized_recipients,
 			tenant_photo = excluded.tenant_photo,
 			family_members = excluded.family_members,
 			photo = excluded.photo,
@@ -141,14 +145,14 @@ func (r *SQLiteResidentRepository) UpsertImported(ctx context.Context, resident 
 			updated_at = excluded.updated_at,
 			synced_at = excluded.synced_at
 	`, resident.Unit, resident.Owner, resident.Phones, resident.Tenant, resident.TenantPhoto, resident.FamilyMembers,
-		resident.Photo, resident.SyncStatus, now, resident.LastUpdated, now, resident.Email, resident.TenantEmail, resident.TenantPhone)
+		resident.Photo, resident.SyncStatus, now, resident.LastUpdated, now, resident.Email, resident.TenantEmail, resident.TenantPhone, resident.AuthorizedRecipients)
 	if err != nil {
 		return nil, fmt.Errorf("upsert imported resident: %w", err)
 	}
 
 	row := r.db.QueryRowContext(ctx, `
 		SELECT unit, owner, phones, tenant, tenant_photo, family_members, photo, sync_status, updated_at,
-			email, tenant_email, tenant_phone
+			email, tenant_email, tenant_phone, authorized_recipients
 		FROM residents
 		WHERE unit = ?
 	`, resident.Unit)
@@ -167,6 +171,7 @@ func (r *SQLiteResidentRepository) UpsertImported(ctx context.Context, resident 
 		&updated.Email,
 		&updated.TenantEmail,
 		&updated.TenantPhone,
+		&updated.AuthorizedRecipients,
 	); err != nil {
 		return nil, fmt.Errorf("read imported resident after upsert: %w", err)
 	}
@@ -177,7 +182,7 @@ func (r *SQLiteResidentRepository) UpsertImported(ctx context.Context, resident 
 func (r *SQLiteResidentRepository) ListPendingSync(ctx context.Context, limit int) ([]domain.Resident, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT unit, owner, phones, tenant, tenant_photo, family_members, photo, sync_status, updated_at,
-			email, tenant_email, tenant_phone
+			email, tenant_email, tenant_phone, authorized_recipients
 		FROM residents
 		WHERE sync_status IN (?, ?)
 		ORDER BY updated_at ASC
@@ -204,6 +209,7 @@ func (r *SQLiteResidentRepository) ListPendingSync(ctx context.Context, limit in
 			&resident.Email,
 			&resident.TenantEmail,
 			&resident.TenantPhone,
+			&resident.AuthorizedRecipients,
 		); err != nil {
 			return nil, fmt.Errorf("scan pending resident: %w", err)
 		}
