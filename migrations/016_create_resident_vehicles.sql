@@ -1,4 +1,4 @@
-CREATE TABLE resident_vehicles (
+CREATE TABLE IF NOT EXISTS resident_vehicles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   unit TEXT NOT NULL REFERENCES residents(unit) ON DELETE CASCADE,
   plate TEXT NOT NULL,
