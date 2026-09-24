@@ -41,6 +41,22 @@ Para conta Google gratuita, use `PHOTO_STORAGE_DIR` apontando para uma pasta loc
 
 ## Endpoints
 
+### Estoque de produtos de limpeza
+
+- `GET /api/inventory`: produtos, saldos, compras e movimentacoes.
+- `POST /api/inventory/products`: produto, unidade, estoque minimo e saldo inicial contado.
+- `POST /api/inventory/products/{productID}`: altera nome e estoque minimo; a unidade e preservada.
+- `POST /api/inventory/purchases`: compra com data, fornecedor, documento opcional e itens com quantidade e preco unitario.
+- `POST /api/inventory/withdrawals`: saida com produto, quantidade, data e responsavel obrigatorio.
+
+Quantidades usam milesimos da unidade (`quantityMilli`, `stockMilli`) e valores usam
+centavos (`unitCostCents`, `totalCents`). Cada POST inclui `requestId` para permitir
+reenvio sem duplicar estoque. Compras com varios itens sao atomicas e retiradas nao
+podem deixar saldo negativo. Os dados ficam no SQLite e nos backups da portaria;
+este modulo ainda nao sincroniza com Google Sheets.
+
+### Demais registros
+
 - `POST /api/access-logs`
 - `GET /api/access-logs`
 - `GET /api/access-logs/open`

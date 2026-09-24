@@ -10,6 +10,7 @@ import (
 )
 
 type RouterDeps struct {
+	InventoryService            *usecase.InventoryService
 	ResidentVehicleService      *usecase.ResidentVehicleService
 	ReservationGuestService     *usecase.ReservationGuestService
 	AccessLogService            *usecase.AccessLogService
@@ -44,6 +45,14 @@ func NewRouter(deps RouterDeps) http.Handler {
 	syncHandler := NewSyncHandler(deps.SyncService)
 
 	mux := http.NewServeMux()
+	if deps.InventoryService != nil {
+		inventory := &InventoryHandler{service: deps.InventoryService}
+		mux.HandleFunc("GET /api/inventory", inventory.Snapshot)
+		mux.HandleFunc("POST /api/inventory/products", inventory.Product)
+		mux.HandleFunc("POST /api/inventory/products/{productID}", inventory.Product)
+		mux.HandleFunc("POST /api/inventory/purchases", inventory.Purchase)
+		mux.HandleFunc("POST /api/inventory/withdrawals", inventory.Withdraw)
+	}
 	if deps.ResidentVehicleService != nil {
 		vehicles := &ResidentVehicleHandler{service: deps.ResidentVehicleService}
 		mux.HandleFunc("GET /api/residents/{unit}/vehicles", vehicles.List)

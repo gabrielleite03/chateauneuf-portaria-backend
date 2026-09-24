@@ -67,6 +67,7 @@ func main() {
 	photoStore := photos.NewStore(cfg.PhotoStorageDir)
 
 	router := handler.NewRouter(handler.RouterDeps{
+		InventoryService:            usecase.NewInventoryService(db),
 		AccessLogService:            accessLogService,
 		ResidentService:             residentService,
 		ResidentVehicleService:      usecase.NewResidentVehicleService(db),
