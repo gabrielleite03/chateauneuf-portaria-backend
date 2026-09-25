@@ -37,6 +37,10 @@ func TestInventoryHTTPFlow(t *testing.T) {
 	request(http.MethodPost, "/api/inventory/withdrawals", `{"requestId":"withdraw-0001","productId":"product-0001","quantityMilli":500,"date":"2026-01-02","responsible":"Maria","notes":"Hall"}`, 200)
 	request(http.MethodPost, "/api/inventory/withdrawals", `{"requestId":"withdraw-0002","productId":"product-0001","quantityMilli":2000,"date":"2026-01-02","responsible":"Maria"}`, 400)
 	request(http.MethodPost, "/api/inventory/products", `{"unexpected":true}`, 400)
+	request(http.MethodPost, "/api/inventory/products/product-0001", `{"requestId":"edit-0000001","name":"Sabão","unit":"kg","initialMilli":5000}`, 403)
+	request(http.MethodPost, "/api/inventory/products/product-0001", `{"requestId":"edit-0000001","name":"Sabão","unit":"kg","initialMilli":5000,"password":"wrong"}`, 403)
+	request(http.MethodPost, "/api/inventory/products/product-0001/delete", `{"requestId":"delete-000001"}`, 403)
+	request(http.MethodPost, "/api/inventory/products/product-0001/delete", `{"requestId":"delete-000001","password":"wrong"}`, 403)
 	request(http.MethodPost, "/api/inventory/products", `{} {}`, 400)
 	response := request(http.MethodGet, "/api/inventory", "", 200)
 	var data usecase.InventorySnapshot

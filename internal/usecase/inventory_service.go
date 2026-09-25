@@ -25,6 +25,8 @@ type InventoryProduct struct {
 	Unit         string `json:"unit"`
 	MinimumMilli int64  `json:"minimumMilli"`
 	StockMilli   int64  `json:"stockMilli"`
+	InitialMilli int64  `json:"initialMilli"`
+	Deleted      bool   `json:"deleted"`
 }
 type InventoryPurchase struct {
 	ID         string `json:"id"`
@@ -52,6 +54,7 @@ type InventorySnapshot struct {
 	Movements []InventoryMovement `json:"movements"`
 }
 type InventoryProductInput struct {
+	Password     string `json:"password,omitempty"`
 	RequestID    string `json:"requestId"`
 	Name         string `json:"name"`
 	Unit         string `json:"unit"`
@@ -81,9 +84,14 @@ type InventoryWithdrawalInput struct {
 	Responsible   string `json:"responsible"`
 	Notes         string `json:"notes"`
 }
-type InventoryService struct{ db *sql.DB }
+type InventoryService struct {
+	db               *sql.DB
+	passwordVerifier string
+}
 
-func NewInventoryService(db *sql.DB) *InventoryService { return &InventoryService{db: db} }
+func NewInventoryService(db *sql.DB) *InventoryService {
+	return &InventoryService{db: db, passwordVerifier: inventoryPasswordVerifier}
+}
 
 var inventoryID = regexp.MustCompile(`^[a-zA-Z0-9-]{8,80}$`)
 
@@ -134,14 +142,17 @@ func (s *InventoryService) operation(ctx context.Context, id, action string, inp
 	return tx.Commit()
 }
 func (s *InventoryService) SaveProduct(ctx context.Context, id string, in InventoryProductInput) error {
+	if id != "" {
+		if err := s.authorize(in.Password); err != nil {
+			return err
+		}
+	}
+	in.Password = "" // Never retain credentials in idempotency fingerprints or audit data.
 	in.Name = strings.Join(strings.Fields(in.Name), " ")
 	in.Responsible = strings.TrimSpace(in.Responsible)
 	validUnit := map[string]bool{"un": true, "frasco": true, "galão": true, "pacote": true, "caixa": true, "L": true, "kg": true}
 	if in.Name == "" || !inventoryText(in.Name, 120) || !validUnit[in.Unit] || in.MinimumMilli < 0 || in.MinimumMilli > 100000000 || in.InitialMilli < 0 || in.InitialMilli > 100000000 || !inventoryText(in.Responsible, 120) {
 		return InventoryError("Confira nome, unidade, estoque mínimo e saldo inicial do produto.")
-	}
-	if id != "" && in.InitialMilli != 0 {
-		return InventoryError("O saldo inicial só pode ser informado no cadastro do produto.")
 	}
 	if id == "" && in.InitialMilli > 0 && (!inventoryDate(in.Date) || in.Responsible == "") {
 		return InventoryError("Informe data válida e responsável pela contagem inicial.")
@@ -151,15 +162,38 @@ func (s *InventoryService) SaveProduct(ctx context.Context, id string, in Invent
 		if id == "" {
 			_, err = tx.ExecContext(ctx, `INSERT INTO inventory_products(id,name,name_key,unit,minimum_milli,stock_milli) VALUES (?,?,?,?,?,?)`, in.RequestID, in.Name, strings.ToLower(in.Name), in.Unit, in.MinimumMilli, in.InitialMilli)
 		} else {
-			var result sql.Result
-			result, err = tx.ExecContext(ctx, `UPDATE inventory_products SET name=?,name_key=?,minimum_milli=? WHERE id=? AND unit=?`, in.Name, strings.ToLower(in.Name), in.MinimumMilli, id, in.Unit)
+			previous, e := inventoryProductInTx(ctx, tx, id)
+			if e != nil {
+				return e
+			}
+			if previous.Deleted || previous.Unit != in.Unit {
+				return InventoryError("Produto excluído ou unidade alterada.")
+			}
+			nextStock := previous.StockMilli + in.InitialMilli - previous.InitialMilli
+			if nextStock < 0 || nextStock > 9000000000000 {
+				return InventoryError("A quantidade inicial informada é incompatível com as compras e retiradas já registradas.")
+			}
+			_, err = tx.ExecContext(ctx, `UPDATE inventory_products SET name=?,name_key=?,minimum_milli=?,stock_milli=? WHERE id=? AND deleted_at=''`, in.Name, strings.ToLower(in.Name), in.MinimumMilli, nextStock, id)
 			if err == nil {
-				n, e := result.RowsAffected()
-				if e != nil {
-					return e
+				if in.InitialMilli != previous.InitialMilli {
+					if in.InitialMilli == 0 {
+						_, err = tx.ExecContext(ctx, `DELETE FROM inventory_movements WHERE product_id=? AND kind='initial'`, id)
+					} else if previous.InitialMilli > 0 {
+						_, err = tx.ExecContext(ctx, `UPDATE inventory_movements SET quantity_milli=? WHERE product_id=? AND kind='initial'`, in.InitialMilli, id)
+					} else {
+						_, err = tx.ExecContext(ctx, `INSERT INTO inventory_movements(product_id,kind,date,quantity_milli,notes) VALUES (?,'initial',?,?,?)`, id, time.Now().In(time.FixedZone("Sao Paulo", -3*60*60)).Format("2006-01-02"), in.InitialMilli, "Saldo inicial incluído por correção autorizada")
+					}
+					if err != nil {
+						return err
+					}
 				}
-				if n == 0 {
-					return InventoryError("Produto não encontrado ou unidade alterada.")
+				next := *previous
+				next.Name = in.Name
+				next.MinimumMilli = in.MinimumMilli
+				next.InitialMilli = in.InitialMilli
+				next.StockMilli = nextStock
+				if err := inventoryAudit(ctx, tx, "edit", previous, &next); err != nil {
+					return err
 				}
 			}
 		}
@@ -197,7 +231,7 @@ func (s *InventoryService) Purchase(ctx context.Context, in InventoryPurchaseInp
 			return err
 		}
 		for _, item := range in.Items {
-			result, err := tx.ExecContext(ctx, `UPDATE inventory_products SET stock_milli=stock_milli+? WHERE id=? AND stock_milli<=9000000000000-?`, item.QuantityMilli, item.ProductID, item.QuantityMilli)
+			result, err := tx.ExecContext(ctx, `UPDATE inventory_products SET stock_milli=stock_milli+? WHERE id=? AND deleted_at='' AND stock_milli<=9000000000000-?`, item.QuantityMilli, item.ProductID, item.QuantityMilli)
 			if err != nil {
 				return err
 			}
@@ -223,7 +257,7 @@ func (s *InventoryService) Withdraw(ctx context.Context, in InventoryWithdrawalI
 		return InventoryError("Informe produto, quantidade positiva, data válida e responsável pela retirada.")
 	}
 	return s.operation(ctx, in.RequestID, "withdrawal", in, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `UPDATE inventory_products SET stock_milli=stock_milli-? WHERE id=? AND stock_milli>=?`, in.QuantityMilli, in.ProductID, in.QuantityMilli)
+		result, err := tx.ExecContext(ctx, `UPDATE inventory_products SET stock_milli=stock_milli-? WHERE id=? AND deleted_at='' AND stock_milli>=?`, in.QuantityMilli, in.ProductID, in.QuantityMilli)
 		if err != nil {
 			return err
 		}
@@ -246,13 +280,13 @@ func (s *InventoryService) Snapshot(ctx context.Context) (*InventorySnapshot, er
 	}
 	defer tx.Rollback()
 	out := &InventorySnapshot{Products: []InventoryProduct{}, Purchases: []InventoryPurchase{}, Movements: []InventoryMovement{}}
-	rows, err := tx.QueryContext(ctx, `SELECT id,name,unit,minimum_milli,stock_milli FROM inventory_products ORDER BY name_key`)
+	rows, err := tx.QueryContext(ctx, `SELECT id,name,unit,minimum_milli,stock_milli,COALESCE((SELECT SUM(quantity_milli) FROM inventory_movements WHERE product_id=inventory_products.id AND kind='initial'),0),deleted_at<>'' FROM inventory_products ORDER BY name_key`)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var p InventoryProduct
-		if err := rows.Scan(&p.ID, &p.Name, &p.Unit, &p.MinimumMilli, &p.StockMilli); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Unit, &p.MinimumMilli, &p.StockMilli, &p.InitialMilli, &p.Deleted); err != nil {
 			rows.Close()
 			return nil, err
 		}

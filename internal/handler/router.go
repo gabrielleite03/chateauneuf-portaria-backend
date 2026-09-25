@@ -50,6 +50,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 		mux.HandleFunc("GET /api/inventory", inventory.Snapshot)
 		mux.HandleFunc("POST /api/inventory/products", inventory.Product)
 		mux.HandleFunc("POST /api/inventory/products/{productID}", inventory.Product)
+		mux.HandleFunc("POST /api/inventory/products/{productID}/delete", inventory.DeleteProduct)
 		mux.HandleFunc("POST /api/inventory/purchases", inventory.Purchase)
 		mux.HandleFunc("POST /api/inventory/withdrawals", inventory.Withdraw)
 	}

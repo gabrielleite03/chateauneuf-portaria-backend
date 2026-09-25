@@ -3,6 +3,7 @@ package handler
 import (
 	"chateauneuf-portaria-backend/internal/usecase"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 )
@@ -24,6 +25,10 @@ func inventoryDecode(w http.ResponseWriter, r *http.Request, input any) bool {
 }
 func inventoryResult(w http.ResponseWriter, err error) {
 	if err != nil {
+		if errors.Is(err, usecase.ErrInventoryUnauthorized) {
+			writeError(w, http.StatusForbidden, err.Error(), "INVENTORY_UNAUTHORIZED")
+			return
+		}
 		if usecase.IsInventoryValidation(err) {
 			writeError(w, 400, err.Error(), "INVALID_INVENTORY")
 		} else {
@@ -61,4 +66,12 @@ func (h *InventoryHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	inventoryResult(w, h.service.Withdraw(r.Context(), input))
+}
+
+func (h *InventoryHandler) DeleteProduct(w http.ResponseWriter, r *http.Request) {
+	var input usecase.InventoryDeleteInput
+	if !inventoryDecode(w, r, &input) {
+		return
+	}
+	inventoryResult(w, h.service.DeleteProduct(r.Context(), r.PathValue("productID"), input))
 }

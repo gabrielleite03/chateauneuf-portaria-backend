@@ -23,7 +23,9 @@ func inventoryTestService(t *testing.T) (*InventoryService, *sql.DB) {
 	if err := database.Migrate(db, filepath.Join("..", "..", "migrations")); err != nil {
 		t.Fatal(err)
 	}
-	return NewInventoryService(db), db
+	service := NewInventoryService(db)
+	service.passwordVerifier = "bab5121981ecfb09398732ffdf7a488d:8f90271e50d9a4f6f6cfbafd02625c9c0db0e5317c6c68d9c9001647bae35e02"
+	return service, db
 }
 func inventoryTestProduct(t *testing.T, s *InventoryService, id string, initial int64) {
 	t.Helper()
@@ -67,7 +69,7 @@ func TestInventoryPurchaseWithdrawalAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Editing a label/minimum must not change the stock or historical price.
-	if err := s.SaveProduct(ctx, "product-0001", InventoryProductInput{RequestID: "edit-0000001", Name: "Detergente", Unit: "L", MinimumMilli: 4000}); err != nil {
+	if err := s.SaveProduct(ctx, "product-0001", InventoryProductInput{RequestID: "edit-0000001", Name: "Detergente", Unit: "L", MinimumMilli: 4000, InitialMilli: 2000, Password: "inventory-test-secret"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Migrate(db, filepath.Join("..", "..", "migrations")); err != nil {
@@ -129,6 +131,7 @@ func TestInventoryValidation(t *testing.T) {
 		t.Fatalf("duplicate name accepted: %v", err)
 	}
 	duplicate.Name = "New label"
+	duplicate.Password = "inventory-test-secret"
 	duplicate.Unit = "kg"
 	if err := s.SaveProduct(ctx, "product-0001", duplicate); !IsInventoryValidation(err) {
 		t.Fatalf("unit change accepted: %v", err)
