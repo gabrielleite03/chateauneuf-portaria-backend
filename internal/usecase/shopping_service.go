@@ -11,11 +11,13 @@ type ShoppingRepository interface {
 	List(ctx context.Context) ([]domain.ShoppingDelivery, error)
 	Create(ctx context.Context, delivery domain.ShoppingDelivery) (*domain.ShoppingDelivery, error)
 	Withdraw(ctx context.Context, id string) (*domain.ShoppingDelivery, error)
+	Delete(ctx context.Context, id string) error
 }
 
 type ShoppingService struct {
-	repository      ShoppingRepository
-	arrivalNotifier interface {
+	passwordVerifier string
+	repository       ShoppingRepository
+	arrivalNotifier  interface {
 		NotifyDeliveryArrival(context.Context, domain.ShoppingDelivery, string) error
 	}
 }
@@ -37,7 +39,14 @@ type WithdrawShoppingInput struct {
 }
 
 func NewShoppingService(repository ShoppingRepository) *ShoppingService {
-	return &ShoppingService{repository: repository}
+	return &ShoppingService{repository: repository, passwordVerifier: "0e73e19061190513dbb755ecf08f03df:4e2c13b8a89b2207e8f7c4d9ff5f17953c341b4d85d145fb6f9b10da3e53ab68"}
+}
+
+func (s *ShoppingService) Delete(ctx context.Context, id, password string) error {
+	if err := authorizePassword(password, s.passwordVerifier); err != nil {
+		return err
+	}
+	return s.repository.Delete(ctx, id)
 }
 
 func (s *ShoppingService) SetArrivalNotifier(notifier interface {

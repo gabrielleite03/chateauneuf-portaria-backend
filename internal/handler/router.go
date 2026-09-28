@@ -88,6 +88,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 	mux.HandleFunc("GET /api/shopping", shoppingHandler.List)
 	mux.HandleFunc("POST /api/shopping", shoppingHandler.Create)
 	mux.HandleFunc("POST /api/shopping/withdraw", shoppingHandler.Withdraw)
+	mux.HandleFunc("POST /api/shopping/{id}/delete", shoppingHandler.Delete)
 	mux.HandleFunc("GET /api/reservations", reservationHandler.List)
 	mux.HandleFunc("POST /api/reservations", reservationHandler.Create)
 	mux.HandleFunc("POST /api/reservations/status", reservationHandler.UpdateStatus)

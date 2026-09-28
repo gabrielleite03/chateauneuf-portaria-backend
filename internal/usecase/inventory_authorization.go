@@ -16,10 +16,14 @@ var ErrInventoryUnauthorized = errors.New("Senha inválida. A alteração não f
 const inventoryPasswordVerifier = "d91604030dac6d5ce3a323641fd69763:e10ef5ebc5259517051bb5b904ff2cf78799dc9773de99c8e4df6e4e41103d92"
 
 func (s *InventoryService) authorize(password string) error {
+	return authorizePassword(password, s.passwordVerifier)
+}
+
+func authorizePassword(password, verifier string) error {
 	if len(password) == 0 || len(password) > 256 {
 		return ErrInventoryUnauthorized
 	}
-	saltHex, expectedHex, ok := strings.Cut(s.passwordVerifier, ":")
+	saltHex, expectedHex, ok := strings.Cut(verifier, ":")
 	salt, err := hex.DecodeString(saltHex)
 	if !ok || err != nil || len(salt) != 16 {
 		return ErrInventoryUnauthorized

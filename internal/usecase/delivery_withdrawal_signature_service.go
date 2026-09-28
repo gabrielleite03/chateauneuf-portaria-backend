@@ -45,7 +45,7 @@ func (s *DeliveryWithdrawalSignatureService) CreateCode(ctx context.Context, del
 		return SignatureCode{}, domain.ErrInvalidInput
 	}
 	var unit, status string
-	if err = s.db.QueryRowContext(ctx, `SELECT unit,status FROM shopping_deliveries WHERE id=?`, id).Scan(&unit, &status); err != nil {
+	if err = s.db.QueryRowContext(ctx, `SELECT unit,status FROM shopping_deliveries WHERE id=? AND id NOT IN (SELECT delivery_id FROM shopping_delivery_deletions)`, id).Scan(&unit, &status); err != nil {
 		return SignatureCode{}, domain.ErrNotFound
 	}
 	if status != string(domain.ShoppingStatusWaiting) {
@@ -84,7 +84,7 @@ func (s *DeliveryWithdrawalSignatureService) Lookup(ctx context.Context, code st
 		SELECT CAST(d.id AS TEXT),d.unit,d.recipient,d.store,d.product,d.received_at,s.expires_at
 		FROM delivery_withdrawal_signatures s
 		JOIN shopping_deliveries d ON d.id=s.delivery_id
-		WHERE s.code_hash=? AND s.consumed_at IS NULL AND s.expires_at>? AND d.status=?
+		WHERE s.code_hash=? AND s.consumed_at IS NULL AND s.expires_at>? AND d.status=? AND d.id NOT IN (SELECT delivery_id FROM shopping_delivery_deletions)
 	`, codeHash(strings.TrimSpace(code)), time.Now(), domain.ShoppingStatusWaiting).Scan(&form.DeliveryID, &form.Unit, &form.Recipient, &form.Store, &form.Product, &form.ReceivedAt, &form.ExpiresAt)
 	if err != nil {
 		return DeliveryWithdrawalForm{}, ErrSignatureCodeInvalid
@@ -112,7 +112,7 @@ func (s *DeliveryWithdrawalSignatureService) Confirm(ctx context.Context, code, 
 	err = tx.QueryRowContext(ctx, `
 		SELECT d.id,d.unit,d.recipient,d.store,d.product,s.recipient_email
 		FROM delivery_withdrawal_signatures s JOIN shopping_deliveries d ON d.id=s.delivery_id
-		WHERE s.code_hash=? AND s.consumed_at IS NULL AND s.expires_at>? AND d.status=?
+		WHERE s.code_hash=? AND s.consumed_at IS NULL AND s.expires_at>? AND d.status=? AND d.id NOT IN (SELECT delivery_id FROM shopping_delivery_deletions)
 	`, codeHash(strings.TrimSpace(code)), now, domain.ShoppingStatusWaiting).Scan(&deliveryID, &unit, &recipient, &store, &product, &email)
 	if err != nil {
 		return ErrSignatureCodeInvalid

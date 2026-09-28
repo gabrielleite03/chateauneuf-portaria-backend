@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"chateauneuf-portaria-backend/internal/photos"
@@ -25,6 +26,25 @@ func (h *ShoppingHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, deliveries)
+}
+
+func (h *ShoppingHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "JSON invalido", "VALIDATION_ERROR")
+		return
+	}
+	if err := h.service.Delete(r.Context(), r.PathValue("id"), input.Password); err != nil {
+		if errors.Is(err, usecase.ErrInventoryUnauthorized) {
+			writeError(w, http.StatusForbidden, "Senha inválida. Exclusão não autorizada.", "FORBIDDEN")
+		} else {
+			writeDomainError(w, err)
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }
 
 func (h *ShoppingHandler) Create(w http.ResponseWriter, r *http.Request) {

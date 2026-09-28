@@ -53,6 +53,7 @@ func TestDeliveryWithdrawalSignatureFlow(t *testing.T) {
 	defer db.Close()
 	_, err = db.Exec(`
 		CREATE TABLE shopping_deliveries(id INTEGER PRIMARY KEY,unit TEXT,recipient TEXT,store TEXT,product TEXT,received_at DATETIME,withdrawn_at DATETIME,status TEXT,sync_status TEXT,sync_error TEXT,updated_at DATETIME);
+		CREATE TABLE shopping_delivery_deletions(delivery_id INTEGER PRIMARY KEY,deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP);
 		CREATE TABLE delivery_withdrawal_signatures(id INTEGER PRIMARY KEY,delivery_id INTEGER,code_hash TEXT UNIQUE,expires_at DATETIME,consumed_at DATETIME,signature_png BLOB,recipient_email TEXT,email_status TEXT DEFAULT 'pending',email_error TEXT DEFAULT '',created_at DATETIME);
 		INSERT INTO shopping_deliveries(id,unit,recipient,store,product,received_at,status,sync_status,sync_error,updated_at) VALUES(1,'Apto 13','Morador','Loja','Caixa',CURRENT_TIMESTAMP,'aguardando_retirada','SINCRONIZADO','',CURRENT_TIMESTAMP);
 	`)
@@ -69,6 +70,18 @@ func TestDeliveryWithdrawalSignatureFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	signature := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte(strings.Repeat("x", 150)))
+	if _, err = db.Exec(`INSERT INTO shopping_delivery_deletions(delivery_id) VALUES(1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.Lookup(context.Background(), code.Code); err != ErrSignatureCodeInvalid {
+		t.Fatalf("deleted delivery lookup: %v", err)
+	}
+	if err = service.Confirm(context.Background(), code.Code, signature); err != ErrSignatureCodeInvalid {
+		t.Fatalf("deleted delivery confirmation: %v", err)
+	}
+	if _, err = db.Exec(`DELETE FROM shopping_delivery_deletions WHERE delivery_id=1`); err != nil {
+		t.Fatal(err)
+	}
 	if err = service.Confirm(context.Background(), code.Code, signature); err != nil {
 		t.Fatal(err)
 	}

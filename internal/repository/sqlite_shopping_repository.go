@@ -24,6 +24,7 @@ func (r *SQLiteShoppingRepository) List(ctx context.Context) ([]domain.ShoppingD
 		SELECT id, unit, recipient, courier_name, document, store, product, notes, photo, received_at, withdrawn_at,
 			status, sync_status, created_at, updated_at
 		FROM shopping_deliveries
+		WHERE id NOT IN (SELECT delivery_id FROM shopping_delivery_deletions)
 		ORDER BY received_at DESC, id DESC
 	`)
 }
@@ -58,7 +59,7 @@ func (r *SQLiteShoppingRepository) Withdraw(ctx context.Context, id string) (*do
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE shopping_deliveries
 		SET withdrawn_at = ?, status = ?, sync_status = ?, sync_error = '', updated_at = ?
-		WHERE id = ? AND status = ?
+		WHERE id = ? AND status = ? AND id NOT IN (SELECT delivery_id FROM shopping_delivery_deletions)
 	`, now, domain.ShoppingStatusWithdrawn, domain.SyncStatusPending, now, numericID, domain.ShoppingStatusWaiting)
 	if err != nil {
 		return nil, fmt.Errorf("withdraw shopping delivery: %w", err)
@@ -83,7 +84,7 @@ func (r *SQLiteShoppingRepository) ListPendingSync(ctx context.Context, limit in
 		SELECT id, unit, recipient, courier_name, document, store, product, notes, photo, received_at, withdrawn_at,
 			status, sync_status, created_at, updated_at
 		FROM shopping_deliveries
-		WHERE sync_status IN (?, ?)
+		WHERE sync_status IN (?, ?) AND id NOT IN (SELECT delivery_id FROM shopping_delivery_deletions)
 		ORDER BY updated_at ASC
 		LIMIT ?
 	`, domain.SyncStatusPending, domain.SyncStatusError, limit)
@@ -128,6 +129,7 @@ func (r *SQLiteShoppingRepository) SyncStats(ctx context.Context) (int, error) {
 	err := r.db.QueryRowContext(ctx, `
 		SELECT COUNT(CASE WHEN sync_status IN ('PENDENTE_SYNC', 'ERRO_SYNC') THEN 1 END)
 		FROM shopping_deliveries
+		WHERE id NOT IN (SELECT delivery_id FROM shopping_delivery_deletions)
 	`).Scan(&pendingCount)
 	if err != nil {
 		return 0, fmt.Errorf("read shopping sync stats: %w", err)
@@ -199,6 +201,32 @@ func (r *SQLiteShoppingRepository) queryShopping(ctx context.Context, query stri
 func parseShoppingID(id string) (int64, error) {
 	cleanID := strings.TrimPrefix(strings.TrimSpace(id), "s-")
 	return strconv.ParseInt(cleanID, 10, 64)
+}
+
+// Keep the original delivery and a deletion timestamp for audit. Repeated
+// requests are harmless; withdrawn deliveries cannot be removed this way.
+func (r *SQLiteShoppingRepository) Delete(ctx context.Context, id string) error {
+	numericID, err := parseShoppingID(id)
+	if err != nil || numericID <= 0 {
+		return domain.ErrInvalidInput
+	}
+	result, err := r.db.ExecContext(ctx, `INSERT INTO shopping_delivery_deletions(delivery_id)
+		SELECT id FROM shopping_deliveries WHERE id=? AND status=?
+		ON CONFLICT(delivery_id) DO NOTHING`, numericID, domain.ShoppingStatusWaiting)
+	if err != nil {
+		return fmt.Errorf("delete shopping delivery: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		var exists int
+		if err := r.db.QueryRowContext(ctx, `SELECT 1 FROM shopping_delivery_deletions WHERE delivery_id=?`, numericID).Scan(&exists); err != nil {
+			return domain.ErrNotFound
+		}
+	}
+	return nil
 }
 
 func shoppingClientSyncStatus(status domain.SyncStatus) domain.SyncStatus {
