@@ -39,7 +39,7 @@ type WithdrawShoppingInput struct {
 }
 
 func NewShoppingService(repository ShoppingRepository) *ShoppingService {
-	return &ShoppingService{repository: repository, passwordVerifier: "0e73e19061190513dbb755ecf08f03df:4e2c13b8a89b2207e8f7c4d9ff5f17953c341b4d85d145fb6f9b10da3e53ab68"}
+	return &ShoppingService{repository: repository, passwordVerifier: inventoryPasswordVerifier}
 }
 
 func (s *ShoppingService) Delete(ctx context.Context, id, password string) error {
